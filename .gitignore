@@ -1,0 +1,104 @@
+# ==============================================================================
+# Python / Backend (FastAPI, NVML, Orchestrator)
+# ==============================================================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environments
+.env
+.env.local
+.venv
+env/
+venv/
+ENV/
+
+# ==============================================================================
+# Next.js / Frontend (Unified Web Dashboard)
+# ==============================================================================
+node_modules/
+.pnp
+.pnp.js
+.next/
+out/
+build/
+.swc/
+coverage/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ==============================================================================
+# Machine Learning, Unsloth, & vLLM Data
+# ==============================================================================
+# Model Weights & Adapters (Prevent pushing large LLM files)
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.ckpt
+*.h5
+*.msgpack
+models/
+checkpoints/
+lora_adapters/
+merged_models/
+huggingface/
+
+# Datasets & Synthetic Data Factory
+datasets/
+synthetic_data/
+eval_results/
+replay_buffer/
+*.jsonl
+*.csv
+*.parquet
+
+# Logs & Telemetry
+wandb/
+tensorboard/
+*.log
+system_specification_sheet.md
+
+# ==============================================================================
+# Docker & Orchestration
+# ==============================================================================
+docker-compose.override.yml
+.docker/
+redis_data/
+
+# ==============================================================================
+# OS & IDEs
+# ==============================================================================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
