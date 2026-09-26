@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "systemone-builder"
+version = "1.0.0"
+description = "Open-source autonomous System-1 reflex model distillation framework"
+readme = "../README.md"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+dependencies = [
+  "fastapi>=0.110",
+  "uvicorn[standard]>=0.27",
+  "pydantic>=2.6",
+  "pydantic-settings>=2.2",
+  "redis>=5.0",
+  "httpx>=0.27",
+  "docker>=7.0",
+  "nvidia-ml-py>=12.535",
+  "pyyaml>=6.0",
+  "jsonschema>=4.21",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-asyncio>=0.23"]
+# Installed only inside Container A (the Unsloth trainer image).
+train = ["unsloth", "trl", "datasets", "peft", "transformers"]
+
+[project.scripts]
+systemone = "systemone.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["systemone*"]
+
+[tool.setuptools.package-data]
+"systemone.templates" = ["*.json"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

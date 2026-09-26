@@ -1,0 +1,63 @@
+# systemone-builder - Linux host stack (2x RTX 3090, 120GB RAM)
+name: systemone
+
+x-s1-env: &s1-env
+  S1_REDIS_URL: redis://redis:6379/0
+  S1_DATA_DIR: /data
+  S1_WORKSPACE_HOST_PATH: ${PWD}/workspace
+  S1_STUDENT_URL: http://student:8000/v1
+  S1_TRIAGE_URL: http://triage:8000/v1
+
+services:
+  # ------------------------------------------------------------ RAM datastore
+  redis:
+    image: redis:7.4
+    container_name: systemone-redis
+    command: ["redis-server", "/usr/local/etc/redis/redis.conf"]
+    volumes:
+      - ./docker/redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    ulimits:
+      nofile: 65535
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # ------------------------------------------------- orchestrator + LAN API
+  api:
+    build:
+      context: .
+      dockerfile: docker/api/Dockerfile
+    image: systemone/api:latest
+    container_name: systemone-api
+    env_file: [{ path: .env, required: false }]
+    environment:
+      <<: *s1-env
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: utility
+    # host PID namespace so NVML can attribute VRAM to processes
+    pid: host
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./workspace:/data/workspace
+      - ./var/eval_results:/data/eval_results
+      - ./var/domains:/data/domains
+    ports:
+      - "8000:8000"
+    depends_on:
+      redis: { condition: service_healthy }
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [utility]
+    restart: unless-stopped
+
+volumes:
+  redis_data:
