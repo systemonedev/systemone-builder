@@ -96,6 +96,8 @@ class Settings(BaseSettings):
     factory_poll_interval_s: float = 5.0
     factory_judge: bool = True
 
+    telemetry_interval_s: float = 1.0
+
     # ------------------------------------------------------- DPO loop
     # Judge score at/above which teacher corrections skip human review
     # (set to a value > 1 to require the Corrections Studio for everything).

@@ -61,6 +61,22 @@ services:
               capabilities: [utility]
     restart: unless-stopped
 
+  # ----------------------------------------------- unified web dashboard
+  dashboard:
+    build:
+      context: .
+      dockerfile: docker/dashboard/Dockerfile
+      args:
+        # empty = same host as the dashboard, port 8000 (works across the LAN)
+        NEXT_PUBLIC_S1_API_URL: ${S1_PUBLIC_API_URL:-}
+    image: systemone/dashboard:latest
+    container_name: systemone-dashboard
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+    restart: unless-stopped
+
   # ------------------------------------------ GPU 0: Container B (student)
   student:
     build:

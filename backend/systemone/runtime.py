@@ -29,6 +29,8 @@ from systemone.factory.synthetic import SyntheticFactory, VisionParser
 from systemone.routing.router import FastSlowRouter
 from systemone.training.lifecycle import LifecycleError, StudentLifecycleOrchestrator
 from systemone.telemetry.bus import EventBus
+from systemone.telemetry.collector import TelemetryCollector
+from systemone.workflow.engine import WorkflowEngine
 
 log = logging.getLogger(__name__)
 
@@ -92,6 +94,10 @@ class Runtime:
         )
         self._build_phase5()
 
+        # ---- Phase 6: telemetry + prompt-to-workflow
+        self.telemetry = TelemetryCollector(self.bus, self.gpu, self.student, self.triage, settings.telemetry_interval_s)
+        self.workflows = WorkflowEngine(self.oracle, self.store)
+
     def _build_phase5(self) -> None:
         s = self.settings
         self.dpo = DPOLoop(
@@ -150,6 +156,7 @@ class Runtime:
         await self.domains.load()
         await self._load_calibrations()
         self.escalations.start()
+        self.telemetry.start()
         await self._restore_lifecycle()
         if self.settings.auto_factory:
             self.factory.start()
@@ -176,6 +183,7 @@ class Runtime:
     async def shutdown(self) -> None:
         await self.factory.stop()
         await self.escalations.stop()
+        await self.telemetry.stop()
         for a in (self.student, self.triage, self.oracle):
             await a.aclose()
         await self.redis.aclose()

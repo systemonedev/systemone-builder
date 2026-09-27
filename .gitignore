@@ -104,3 +104,7 @@ Thumbs.db
 *.swo
 # systemone runtime state
 workspace/
+*.rdb
+*.aof
+appendonlydir/
+*.tsbuildinfo
