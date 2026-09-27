@@ -22,6 +22,8 @@ from systemone.orchestrator.gpu import create_gpu_monitor
 from systemone.orchestrator.hardware import HardwareOrchestrator
 from systemone.routing.confidence import ConfidenceScorer
 from systemone.routing.oracle import OracleEscalationService
+from systemone.dpo.loop import DPOLoop
+from systemone.evaluation.sandbox import EvaluationSandbox
 from systemone.factory.dataset import DatasetStore
 from systemone.factory.synthetic import SyntheticFactory, VisionParser
 from systemone.routing.router import FastSlowRouter
@@ -88,6 +90,33 @@ class Runtime:
             student_gate=self.lifecycle,
             vision=self.vision,
         )
+        self._build_phase5()
+
+    def _build_phase5(self) -> None:
+        s = self.settings
+        self.dpo = DPOLoop(
+            self.replay, self.store, self.datasets, self.domains, self.factory, self.bus, self.extractor,
+            auto_approve_min_judge=s.dpo_auto_approve_min_judge if s.dpo_auto_approve_min_judge <= 1 else None,
+            on_new_pairs=self._maybe_auto_dpo,
+        )
+        self.evaluation = EvaluationSandbox(
+            {"student": self.student, "triage": self.triage, "oracle": self.oracle},
+            self.datasets, self.domains, self.store, self.bus, self.scorer,
+            s.data_dir / "eval_results", self.student_model_name, s.student_max_tokens,
+        )
+
+    async def _maybe_auto_dpo(self, domain_id: str) -> None:
+        if not self.settings.auto_train or self.lifecycle.busy:
+            return
+        pairs = await self.datasets.count(domain_id, "dpo")
+        done = await self.store.get("dataset", domain_id, "dpo_trained_upto", default=0)
+        if pairs - done >= self.settings.dpo_auto_train_min_pairs:
+            try:
+                cfg = self.lifecycle.start_cycle(domain_id, "dpo")
+                await self.store.set(pairs, "dataset", domain_id, "dpo_trained_upto")
+                self.bus.publish("training", "auto_triggered", domain=domain_id, run_id=cfg["run_id"], rows=cfg["rows"], mode="dpo")
+            except LifecycleError as exc:
+                log.warning("auto-DPO skipped: %s", exc)
 
     async def _maybe_auto_train(self, domain_ids: set[str]) -> None:
         if not self.settings.auto_train or self.lifecycle.busy:

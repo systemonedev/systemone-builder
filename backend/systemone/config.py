@@ -96,6 +96,12 @@ class Settings(BaseSettings):
     factory_poll_interval_s: float = 5.0
     factory_judge: bool = True
 
+    # ------------------------------------------------------- DPO loop
+    # Judge score at/above which teacher corrections skip human review
+    # (set to a value > 1 to require the Corrections Studio for everything).
+    dpo_auto_approve_min_judge: float = 0.9
+    dpo_auto_train_min_pairs: int = 64
+
     @property
     def workspace(self) -> Path:
         return self.data_dir / "workspace"

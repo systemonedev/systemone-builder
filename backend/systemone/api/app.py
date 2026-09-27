@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from systemone import __version__
 from systemone.api.deps import require_api_key
-from systemone.api.routes import extraction, replay, routing, system, training
+from systemone.api.routes import extraction, feedback, replay, routing, system, training
 from systemone.config import Settings, get_settings
 from systemone.runtime import Runtime
 
@@ -40,7 +40,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.include_router(system.public_router, prefix=API_PREFIX)
     auth = [Depends(require_api_key)]
-    for module in (system, replay, extraction, routing, training):
+    for module in (system, replay, extraction, routing, training, feedback):
         app.include_router(module.router, prefix=API_PREFIX, dependencies=auth)
     return app
 
