@@ -17,6 +17,11 @@ async def health(rt: Runtime = Depends(get_rt)) -> dict[str, Any]:
     return {"status": "ok", "version": __version__, **await rt.health()}
 
 
+@router.get("/health/deep")
+async def deep_health(rt: Runtime = Depends(get_rt)) -> dict[str, Any]:
+    return {"status": "ok", "version": __version__, **await rt.deep_health()}
+
+
 @router.get("/hardware")
 async def hardware(rt: Runtime = Depends(get_rt)) -> dict[str, Any]:
     snap = await rt.hardware.snapshot()

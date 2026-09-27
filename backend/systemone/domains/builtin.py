@@ -11,6 +11,7 @@ COMPUTER_USE_STATE_SCHEMA = {
     "type": "object",
     "required": ["url", "viewport_tree"],
     "properties": {
+        "goal": {"type": "string"},
         "url": {"type": "string"},
         "temporal_buffer": {"type": "array", "items": {"type": "string"}},
         "viewport_tree": {
@@ -101,7 +102,7 @@ COMPUTER_USE = DomainSpec(
             "action": {"confidence_score": 0.93, "action": "CLICK", "target_id": 2},
         }
     ],
-    prompt_key_order=["url", "viewport_tree", "temporal_buffer"],
+    prompt_key_order=["goal", "url", "viewport_tree", "temporal_buffer"],
     extractor=ExtractorConfig(type="dom", temporal_buffer_len=8),
     factory=FactoryConfig(
         scenarios=[

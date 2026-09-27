@@ -79,6 +79,9 @@ class DomainSpec(BaseModel):
     # Field of action_output carrying the chosen action.
     action_field: str = "action"
     threshold: float = Field(0.8, ge=0.0, le=1.0)
+    # Acceptance threshold for the GPU 1 triage tier (defaults to ``threshold``).
+    triage_threshold: float | None = Field(None, ge=0.0, le=1.0)
+    triage_enabled: bool = True
     system_prompt: str
     few_shots: list[dict[str, Any]] = Field(default_factory=list)
     # Serialization order of top-level state keys: stable keys first so that
@@ -135,3 +138,18 @@ class DomainSpec(BaseModel):
 
     def action_label(self, action: dict[str, Any] | None) -> str | None:
         return None if not action else action.get(self.action_field)
+
+    @property
+    def effective_triage_threshold(self) -> float:
+        return self.threshold if self.triage_threshold is None else self.triage_threshold
+
+    def escalate_action(self, confidence: float, hint: dict[str, Any] | None = None) -> dict[str, Any]:
+        """The halt action returned while a query is escalated."""
+        if self.kind == "computer_use":
+            return {"confidence_score": confidence, "action": "ESCALATE", "target_id": None, "coordinates": None,
+                    "supported_actions": list(self.supported_actions)}
+        if self.kind == "secops":
+            verdict = (hint or {}).get("verdict") if (hint or {}).get("verdict") in ("BENIGN", "SUSPICIOUS", "MALICIOUS") else "SUSPICIOUS"
+            return {"confidence_score": confidence, "verdict": verdict, "immediate_action": "ESCALATE",
+                    "target_ioc": [], "supported_actions": list(self.supported_actions)}
+        return {"confidence_score": confidence, self.action_field: "ESCALATE", "supported_actions": list(self.supported_actions)}

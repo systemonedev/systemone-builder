@@ -25,6 +25,7 @@ class Observation(BaseModel):
     temporal_buffer: list[str] | None = None
     screenshot_b64: str | None = None
     viewport: tuple[int, int] | None = None  # (width, height) for DOM filtering
+    goal: str | None = None  # task instruction (stable across a session)
     meta: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -90,6 +91,8 @@ class StateExtractor:
                 state["temporal_buffer"] = list(obs.temporal_buffer)[-self.domain.extractor.temporal_buffer_len :]
             if self.domain.kind == "computer_use":
                 state.setdefault("temporal_buffer", [])
+        if obs.goal:
+            state["goal"] = self.scrubber.scrub_text(obs.goal, vault)
         canon = canonical_state(state, self.domain.prompt_key_order)
         return ExtractionResult(
             state=state,

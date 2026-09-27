@@ -71,6 +71,8 @@ class Settings(BaseSettings):
 
     # -------------------------------------------------------------- routing
     default_threshold: float = 0.80
+    oracle_concurrency: int = 1
+    student_max_tokens: int = 192
     # Blend of self-reported confidence vs. token-probability confidence.
     confidence_logprob_weight: float = 0.5
 
