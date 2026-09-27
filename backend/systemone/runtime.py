@@ -21,6 +21,7 @@ from systemone.extraction.prompt import PrefixTracker
 from systemone.orchestrator.docker_ctl import DockerController
 from systemone.orchestrator.gpu import create_gpu_monitor
 from systemone.orchestrator.hardware import HardwareOrchestrator
+from systemone.orchestrator.services import ServiceMonitor
 from systemone.routing.confidence import ConfidenceScorer
 from systemone.routing.oracle import OracleEscalationService
 from systemone.dpo.loop import DPOLoop
@@ -102,6 +103,7 @@ class Runtime:
         # ---- Phase 6: telemetry + prompt-to-workflow
         self.telemetry = TelemetryCollector(self.bus, self.gpu, self.student, self.triage, settings.telemetry_interval_s)
         self.workflows = WorkflowEngine(self.oracle, self.store)
+        self.services = ServiceMonitor(self)
 
     def _build_phase5(self) -> None:
         s = self.settings

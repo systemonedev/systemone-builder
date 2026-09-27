@@ -328,7 +328,8 @@ class StudentLifecycleOrchestrator:
         await self._mark(run, Phase.SERVING, served_model=served)
         return result
 
-    async def _start_student_and_wait(self, served: str, timeout_s: float = 900) -> None:
+    async def _start_student_and_wait(self, served: str, timeout_s: float | None = None) -> None:
+        timeout_s = timeout_s or self.s.student_start_timeout_s
         await self.docker.start(self.s.student_container)
         root = self.s.student_url[:-3] if self.s.student_url.endswith("/v1") else self.s.student_url
         deadline = time.monotonic() + timeout_s
