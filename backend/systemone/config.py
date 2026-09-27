@@ -85,6 +85,8 @@ class Settings(BaseSettings):
     train_max_seq_length: int = 4096
     # Number of new SFT samples that triggers an automatic training cycle.
     auto_train_min_samples: int = 256
+    auto_train: bool = True
+    auto_factory: bool = True
     # "adapter": vLLM loads the LoRA at runtime; "merged": vLLM restarts on
     # the merged 16-bit weights.
     reload_mode: str = "merged"

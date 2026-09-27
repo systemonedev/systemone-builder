@@ -113,6 +113,8 @@ class FastSlowRouter:
         domain_for: Any,
         student_model_name: Any,
         student_max_tokens: int = 192,
+        student_gate: Any = None,
+        vision: Any = None,
     ) -> None:
         self.student = student
         self.triage = triage
@@ -126,6 +128,9 @@ class FastSlowRouter:
         self._domain_for = domain_for
         self._student_model_name = student_model_name
         self.student_max_tokens = student_max_tokens
+        # StudentLifecycleOrchestrator: acquire()/release() around GPU 0 calls
+        self.student_gate = student_gate
+        self.vision = vision
 
     # ----------------------------------------------------------- sessions
     async def session_history(self, domain_id: str, session_id: str) -> list[str]:
@@ -185,6 +190,8 @@ class FastSlowRouter:
         domain: DomainSpec = self._domain_for(domain_id)
         extractor: StateExtractor = self._extractor_for(domain_id)
 
+        if obs.kind == "screenshot":
+            obs = await self.screenshot_to_elements(obs)
         if obs.temporal_buffer is None and domain.kind == "computer_use":
             obs = obs.model_copy(update={"temporal_buffer": await self.session_history(domain_id, session_id)})
         ex: ExtractionResult = extractor.extract(obs)
@@ -194,8 +201,16 @@ class FastSlowRouter:
                          state_hash=ex.state_hash, prefix_overlap=overlap)
 
         route: list[TierOutcome] = []
-        student_model = await self._student_model_name()
-        s = await self._run_tier(Tier.STUDENT, self.student, domain, messages, ex.state, domain.threshold, student_model)
+        if self.student_gate is None or self.student_gate.acquire():
+            try:
+                student_model = await self._student_model_name()
+                s = await self._run_tier(Tier.STUDENT, self.student, domain, messages, ex.state, domain.threshold, student_model)
+            finally:
+                if self.student_gate is not None:
+                    self.student_gate.release()
+        else:  # GPU 0 is in a training cycle: straight to triage
+            s = TierOutcome(Tier.STUDENT, False, domain.threshold, error="student paused for training",
+                            report=ConfidenceReport(0.0, None, None, gates=["student_training"]))
         route.append(s)
         self.bus.publish("routing", "tier_result", decision_id=decision_id, domain=domain_id, **s.summary())
         final: TierOutcome | None = s if s.accepted else None
@@ -277,6 +292,15 @@ class FastSlowRouter:
                          halted=halted, confidence=decision.confidence, latency_ms=latency,
                          action_label=domain.action_label(executed), route=[o.summary() for o in route])
         return decision
+
+    async def screenshot_to_elements(self, obs: Observation) -> Observation:
+        if self.vision is None:
+            raise ValueError("no vision parser configured (S1_ORACLE_VISION_MODEL)")
+        if not obs.screenshot_b64 and not isinstance(obs.data, str):
+            raise ValueError("screenshot observation requires screenshot_b64 or base64 data")
+        shot = obs.screenshot_b64 or obs.data
+        elements = await self.vision.parse(shot, obs.viewport)
+        return obs.model_copy(update={"kind": "elements", "data": elements, "screenshot_b64": shot})
 
     @staticmethod
     def _execution_handle(action: dict[str, Any], ex: ExtractionResult) -> dict[str, Any] | None:

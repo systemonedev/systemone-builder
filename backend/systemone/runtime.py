@@ -6,6 +6,7 @@ route handlers reach components through ``request.app.state.rt``.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -21,7 +22,10 @@ from systemone.orchestrator.gpu import create_gpu_monitor
 from systemone.orchestrator.hardware import HardwareOrchestrator
 from systemone.routing.confidence import ConfidenceScorer
 from systemone.routing.oracle import OracleEscalationService
+from systemone.factory.dataset import DatasetStore
+from systemone.factory.synthetic import SyntheticFactory, VisionParser
 from systemone.routing.router import FastSlowRouter
+from systemone.training.lifecycle import LifecycleError, StudentLifecycleOrchestrator
 from systemone.telemetry.bus import EventBus
 
 log = logging.getLogger(__name__)
@@ -51,6 +55,18 @@ class Runtime:
         self.triage = build_adapter(settings.triage_adapter, settings.triage_url, settings.triage_model, settings.request_timeout_s)
         self.oracle = build_adapter(settings.oracle_adapter, settings.oracle_url, settings.oracle_model, settings.oracle_timeout_s)
 
+        # ---- datasets, lifecycle, synthetic factory
+        self.datasets = DatasetStore(settings.workspace / "datasets", self.store)
+        self.lifecycle = StudentLifecycleOrchestrator(
+            settings, self.gpu, self.docker, self.store, self.datasets, self.domains, self.bus
+        )
+        self.factory = SyntheticFactory(
+            self.oracle, self.replay, self.store, self.datasets, self.domains, self.bus,
+            batch_size=settings.factory_batch_size, poll_interval_s=settings.factory_poll_interval_s,
+            use_judge=settings.factory_judge, on_new_samples=self._maybe_auto_train,
+        )
+        self.vision = VisionParser(self.oracle, settings.oracle_vision_model) if settings.oracle_vision_model else None
+
         # ---- Fast-Slow routing
         self.scorer = ConfidenceScorer(settings.confidence_logprob_weight)
         self.escalations = OracleEscalationService(
@@ -69,7 +85,22 @@ class Runtime:
             domain_for=self.domains.get,
             student_model_name=self.student_model_name,
             student_max_tokens=settings.student_max_tokens,
+            student_gate=self.lifecycle,
+            vision=self.vision,
         )
+
+    async def _maybe_auto_train(self, domain_ids: set[str]) -> None:
+        if not self.settings.auto_train or self.lifecycle.busy:
+            return
+        for did in sorted(domain_ids):
+            stats = await self.datasets.stats(did)
+            if stats["new_since_train"] >= self.settings.auto_train_min_samples:
+                try:
+                    cfg = self.lifecycle.start_cycle(did, "sft")
+                    self.bus.publish("training", "auto_triggered", domain=did, run_id=cfg["run_id"], rows=cfg["rows"])
+                except LifecycleError as exc:
+                    log.warning("auto-train skipped: %s", exc)
+                return
 
     async def student_model_name(self) -> str:
         """Model id the student vLLM currently serves (base, LoRA or merged)."""
@@ -90,6 +121,22 @@ class Runtime:
         await self.domains.load()
         await self._load_calibrations()
         self.escalations.start()
+        await self._restore_lifecycle()
+        if self.settings.auto_factory:
+            self.factory.start()
+
+    async def _restore_lifecycle(self) -> None:
+        """After an API restart mid-cycle, make sure the student is serving."""
+        state = await self.store.get("lifecycle", "state", default={})
+        if state.get("phase") not in (None, "serving"):
+            log.warning("lifecycle was %s at shutdown; recovering student", state.get("phase"))
+            asyncio.create_task(self.lifecycle.recover())
+            return
+        # Container B has no restart policy (the orchestrator owns it).
+        info = await self.docker.status(self.settings.student_container)
+        if info.status in ("exited", "created"):
+            log.info("starting student container %s", self.settings.student_container)
+            await self.docker.start(self.settings.student_container)
 
     async def _load_calibrations(self) -> None:
         from systemone.routing.confidence import Calibration
@@ -98,6 +145,7 @@ class Runtime:
             self.scorer.calibrations[did] = Calibration(**c)
 
     async def shutdown(self) -> None:
+        await self.factory.stop()
         await self.escalations.stop()
         for a in (self.student, self.triage, self.oracle):
             await a.aclose()

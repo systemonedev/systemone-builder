@@ -13,7 +13,9 @@ from systemone.extraction.fuzzy import EntityVault, FuzzyScrubber, ScrubPolicy
 from systemone.extraction.logs import LogExtractor
 from systemone.extraction.prompt import PromptBuilder, canonical_state, state_hash
 
-ObservationKind = Literal["state", "html", "ax_tree", "elements", "log", "suricata_eve", "syslog", "json", "text"]
+ObservationKind = Literal[
+    "state", "html", "ax_tree", "elements", "screenshot", "log", "suricata_eve", "syslog", "json", "text"
+]
 
 
 class Observation(BaseModel):
@@ -83,6 +85,8 @@ class StateExtractor:
         elif kind in ("log", "suricata_eve", "syslog", "json", "text"):
             fmt = self.domain.extractor.log_format if kind == "log" else kind
             state = self.logs.extract(obs.data, fmt, vault)
+        elif kind == "screenshot":
+            raise ValueError("screenshot observations must be vision-parsed first (router / /vision/parse)")
         else:  # pre-structured state_input: scrub only
             if not isinstance(obs.data, dict):
                 raise ValueError("observation kind 'state' requires a JSON object")
