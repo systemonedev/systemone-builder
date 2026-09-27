@@ -36,9 +36,16 @@ with `RuntimeError: UVA is not available`. The launcher detects a WSL2 kernel an
 `VLLM_WSL2_ENABLE_PIN_MEMORY=1`. This needs WSL2 kernel ≥ 4.19.121; run `wsl --update` if
 yours is older, or set the variable to `0` in `.env` to opt out.
 
-WSL2 limits how much host memory can be pinned. If a vLLM container fails while allocating
-the CPU KV offload buffer, lower `S1_KV_OFFLOAD_GB` / `S1_TRIAGE_KV_OFFLOAD_GB` (or set them
-to `0`). Also raise the VM's memory in `%UserProfile%\.wslconfig` (`memory=`) so that Redis's
+**Storage.** Keep the workspace (model cache, runs, datasets) in the default Docker named
+volume `systemone-workspace`. A bind mount of a Windows folder (`/mnt/c/...`) goes through
+the 9P bridge at a few MB/s; loading a 3 GB model then takes more than 15 minutes. The
+launcher logs a warning when it detects this.
+
+**CPU KV offload.** vLLM pre-faults its offload region in `/dev/shm`. On WSL2 the kernel
+can refuse to back it (`OSError: [Errno 14] Bad address`). Before starting vLLM, the launcher
+performs the same `madvise(MADV_POPULATE_WRITE)` call vLLM uses, halving the size until it
+succeeds, or disabling offload if nothing fits. You can set the sizes explicitly with
+`S1_KV_OFFLOAD_GB` / `S1_TRIAGE_KV_OFFLOAD_GB`; `S1_KV_OFFLOAD_PROBE=0` skips the probe. Also raise the VM's memory in `%UserProfile%\.wslconfig` (`memory=`) so that Redis's
 64 GB and the offload buffers fit.
 
 ## Linux prerequisites

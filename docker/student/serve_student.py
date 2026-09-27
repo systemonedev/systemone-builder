@@ -21,12 +21,15 @@ instead of crashing the container:
 
 from __future__ import annotations
 
+import errno
 import json
+import mmap
 import os
 import platform
 import re
 import shlex
 import subprocess
+import time
 from pathlib import Path
 
 STATE = Path(os.environ.get("S1_STUDENT_STATE", "/workspace/state/student.json"))
@@ -57,7 +60,70 @@ def in_wsl() -> bool:
     return "microsoft" in " ".join(platform.uname()).lower()
 
 
+SLOW_FS = {"9p", "drvfs", "fuse", "fuse.grpcfuse", "virtiofs", "fakeowner", "cifs", "smb3", "nfs", "nfs4"}
+
+
+def mount_fstype(path: str) -> str | None:
+    """Filesystem type of the mount holding ``path`` (longest prefix wins)."""
+    best, fstype = "", None
+    try:
+        with open("/proc/mounts") as f:
+            for line in f:
+                parts = line.split()
+                if len(parts) >= 3 and path.startswith(parts[1]) and len(parts[1]) > len(best):
+                    best, fstype = parts[1], parts[2]
+    except OSError:
+        return None
+    return fstype
+
+
+def warn_slow_storage() -> None:
+    hf_home = os.environ.get("HF_HOME", "/root/.cache/huggingface")
+    fstype = mount_fstype(hf_home)
+    if fstype in SLOW_FS:
+        print(
+            f"[serve_{ROLE}] WARNING: model cache {hf_home} is on a '{fstype}' mount. Weight loading from a "
+            "host-shared filesystem (e.g. a Windows drive under WSL2) can run at a few MB/s. Use the default "
+            "named volume (S1_WORKSPACE_VOLUME unset) or keep the repo inside the Linux filesystem.",
+            flush=True,
+        )
+
+
+def probe_offload_gb(requested: int) -> int:
+    """Largest CPU KV offload region (GB) the kernel can actually back.
+
+    vLLM pre-faults its offload region in /dev/shm with
+    madvise(MADV_POPULATE_WRITE) and only tolerates EINVAL; kernels that cannot
+    back the pages (WSL2, tight shm or memory limits) return EFAULT/ENOMEM and
+    the engine dies after the model has loaded. Probe with the same call first
+    and halve the size until it succeeds.
+    """
+    size = requested
+    populate = getattr(mmap, "MADV_POPULATE_WRITE", 23)
+    while size >= 1:
+        path = f"/dev/shm/s1_offload_probe_{os.getpid()}"
+        nbytes = size * 1024**3
+        fd = os.open(path, os.O_CREAT | os.O_RDWR | os.O_TRUNC, 0o600)
+        try:
+            os.unlink(path)
+            os.ftruncate(fd, nbytes)
+            with mmap.mmap(fd, nbytes, flags=mmap.MAP_SHARED, prot=mmap.PROT_READ | mmap.PROT_WRITE) as m:
+                t0 = time.monotonic()
+                m.madvise(populate, 0, nbytes)
+                print(f"[serve_{ROLE}] CPU KV offload probe: {size} GB OK ({time.monotonic() - t0:.1f}s)", flush=True)
+                return size
+        except OSError as exc:
+            if exc.errno == errno.EINVAL:  # no MADV_POPULATE_WRITE: vLLM falls back itself
+                return size
+            print(f"[serve_{ROLE}] CPU KV offload probe: {size} GB failed ({errno.errorcode.get(exc.errno, exc.errno)})", flush=True)
+            size //= 2
+        finally:
+            os.close(fd)
+    return 0
+
+
 def main() -> None:
+    warn_slow_storage()
     if in_wsl() and "VLLM_WSL2_ENABLE_PIN_MEMORY" not in os.environ:
         # vLLM disables pinned memory under WSL2 by default, and its V2 model
         # runner cannot start without it ("RuntimeError: UVA is not available").
@@ -92,6 +158,12 @@ def main() -> None:
         ("--generation-config", "vllm"),
     ]
     offload = env("S1_KV_OFFLOAD_GB", defaults["offload"])
+    if offload != "0" and os.environ.get("S1_KV_OFFLOAD_PROBE", "1") != "0":
+        fitted = probe_offload_gb(int(float(offload)))
+        if str(fitted) != offload:
+            print(f"[serve_{ROLE}] reducing CPU KV offload from {offload} GB to {fitted} GB "
+                  "(the kernel could not back more shared memory)", flush=True)
+        offload = str(fitted)
     if offload != "0":
         optional += [("--kv-offloading-backend", env("S1_KV_OFFLOAD_BACKEND", "native")),
                      ("--kv-offloading-size", offload)]

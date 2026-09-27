@@ -106,6 +106,7 @@ Suricata EVE reflex tailer that drives nftables.
 
 ## Documentation
 
+* **[Build your first System-1 model](docs/first-model.md)**: step-by-step walkthrough
 * [Architecture](docs/architecture.md): data flow, routing, lifecycle state machine
 * [Hardware & deployment](docs/hardware.md): GPU/RAM budget, Mac oracle, networking
 * [BYOM](docs/byom.md): plugging in your own student/triage/oracle models and adapters

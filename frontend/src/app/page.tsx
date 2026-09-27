@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { LineChart } from "@/components/LineChart";
+import { ServiceTable, useServices } from "@/components/Services";
 import { Card, PageTitle, Stat, StatusPill } from "@/components/ui";
 import { fmtMb, fmtMs, fmtNum, fmtPct, fmtTime } from "@/utils/format";
 import { useEvents, usePoll, type TelemetrySample } from "@/utils/hooks";
@@ -35,6 +36,7 @@ export default function TelemetryPage() {
   );
   const lifecycle = usePoll<any>("/training/status", 3000);
   const replay = usePoll<any>("/replay/stats", 5000);
+  const services = useServices(4000);
 
   const last = samples[samples.length - 1];
   const x = (s: TelemetrySample) => s.ts;
@@ -64,6 +66,21 @@ export default function TelemetryPage() {
           </div>
         </div>
       </div>
+
+      <Card
+        title="Services"
+        className="mb-4"
+        actions={
+          services.data && (
+            <StatusPill
+              status={services.data.operational ? "good" : "warning"}
+              label={services.data.operational ? "all systems operational" : "not fully operational"}
+            />
+          )
+        }
+      >
+        <ServiceTable snap={services.data} />
+      </Card>
 
       <div className="grid gap-4 xl:grid-cols-2">
         <Card title="Time-To-First-Token (student, ms)">

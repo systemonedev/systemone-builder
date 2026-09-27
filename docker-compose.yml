@@ -4,7 +4,9 @@ name: systemone
 x-s1-env: &s1-env
   S1_REDIS_URL: redis://redis:6379/0
   S1_DATA_DIR: /data
-  S1_WORKSPACE_HOST_PATH: ${PWD}/workspace
+  # Named volume (fast native disk, incl. WSL2/Docker Desktop) or an absolute
+  # host path. The orchestrator mounts the same source into the trainer.
+  S1_WORKSPACE_HOST_PATH: ${S1_WORKSPACE_VOLUME:-systemone-workspace}
   S1_STUDENT_URL: http://student:8000/v1
   S1_TRIAGE_URL: http://triage:8000/v1
 
@@ -43,7 +45,7 @@ services:
     pid: host
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ./workspace:/data/workspace
+      - ${S1_WORKSPACE_VOLUME:-systemone-workspace}:/data/workspace
       - ./var/eval_results:/data/eval_results
       - ./var/domains:/data/domains
     ports:
@@ -107,9 +109,10 @@ services:
       S1_STUDENT_BASE_MODEL: ${S1_STUDENT_BASE_MODEL:-Qwen/Qwen2.5-1.5B-Instruct}
       S1_KV_OFFLOAD_GB: ${S1_KV_OFFLOAD_GB:-32}
       HF_HOME: /workspace/hf_cache
+      VLLM_CACHE_ROOT: /workspace/vllm_cache
       HF_TOKEN: ${HF_TOKEN:-}
     volumes:
-      - ./workspace:/workspace
+      - ${S1_WORKSPACE_VOLUME:-systemone-workspace}:/workspace
     ports:
       - "8001:8000"
     ipc: host
@@ -142,11 +145,12 @@ services:
       S1_KV_OFFLOAD_GB: ${S1_TRIAGE_KV_OFFLOAD_GB:-16}
       S1_VLLM_EXTRA_ARGS: ${S1_TRIAGE_VLLM_EXTRA_ARGS:-}
       HF_HOME: /workspace/hf_cache
+      VLLM_CACHE_ROOT: /workspace/vllm_cache
       HF_TOKEN: ${HF_TOKEN:-}
     depends_on:
       - student   # ensures the shared launcher image is built first
     volumes:
-      - ./workspace:/workspace
+      - ${S1_WORKSPACE_VOLUME:-systemone-workspace}:/workspace
     ports:
       - "8002:8000"
     ipc: host
@@ -180,3 +184,8 @@ services:
 
 volumes:
   redis_data:
+  # Models, HF cache, datasets, training runs. Lives on Docker's native disk
+  # so safetensors load at full speed. Inspect with:
+  #   docker run --rm -it -v systemone-workspace:/workspace alpine sh
+  systemone-workspace:
+    name: systemone-workspace

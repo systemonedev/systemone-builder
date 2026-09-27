@@ -42,6 +42,9 @@ class Settings(BaseSettings):
     # VRAM (MiB) below which GPU 0 is considered flushed.
     vram_flush_threshold_mb: int = 1024
     vram_flush_timeout_s: float = 120.0
+    # How long a (re)started vLLM student may take to load weights and pass
+    # its health check before the lifecycle rolls back.
+    student_start_timeout_s: float = 1800.0
 
     # ------------------------------------------------------ docker lifecycle
     docker_project: str = "systemone"

@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 import { apiBase, apiKey, setApiKey } from "@/utils/api";
 import { usePoll } from "@/utils/hooks";
+import { ServiceList, useServices } from "@/components/Services";
 
 const NAV = [
   { href: "/", label: "Telemetry" },
@@ -45,6 +46,7 @@ function ThemeToggle() {
 export function Shell({ children }: { children: ReactNode }) {
   const path = usePathname();
   const health = usePoll<{ status: string; redis: boolean }>("/health", 5000);
+  const services = useServices(5000);
   const [key, setKey] = useState("");
   const [open, setOpen] = useState(false);
   useEffect(() => setKey(apiKey() ?? ""), []);
@@ -76,10 +78,7 @@ export function Shell({ children }: { children: ReactNode }) {
           })}
         </nav>
         <div className={`${open ? "block" : "hidden"} space-y-2 border-t border-line px-4 py-3 text-xs text-ink-3 md:block`}>
-          <div className="flex items-center gap-1.5">
-            <span style={{ color: ok ? "var(--good)" : "var(--critical)" }}>{ok ? "●" : "✕"}</span>
-            API {ok ? "online" : "offline"}
-          </div>
+          <ServiceList snap={ok ? services.data : null} apiUp={ok} />
           <div className="truncate font-mono" title={apiBase()}>
             {apiBase().replace(/^https?:\/\//, "")}
           </div>
