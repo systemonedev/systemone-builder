@@ -61,6 +61,24 @@ services:
               capabilities: [utility]
     restart: unless-stopped
 
+  # ------------------------------------------ Zero-to-One Quickstart (one-shot)
+  # Loads the dummy web-automation dataset, runs the first strict
+  # train -> hot-reload cycle on the tiny 1.5B student and benchmarks it.
+  # Idempotent: on later `docker compose up` runs it detects the loaded
+  # dataset / finished run and exits. Disable with S1_QUICKSTART=0.
+  quickstart:
+    image: systemone/api:latest
+    container_name: systemone-quickstart
+    env_file: [{ path: .env, required: false }]
+    environment:
+      S1_API: http://api:8000
+      S1_PUBLIC_HOST: ${S1_PUBLIC_HOST:-localhost}
+      S1_QUICKSTART: ${S1_QUICKSTART:-1}
+    entrypoint: ["sh", "-c", "[ \"$$S1_QUICKSTART\" = \"0\" ] && echo 'quickstart disabled' || exec systemone quickstart"]
+    depends_on:
+      api: { condition: service_healthy }
+    restart: "no"
+
   # ----------------------------------------------- unified web dashboard
   dashboard:
     build:
@@ -148,15 +166,18 @@ services:
     restart: unless-stopped
 
   # ------------------------------------------ GPU 0: Container A (trainer)
-  # Build-only: the orchestrator launches it one-shot via the Docker Engine
-  # API after stopping the student. `docker compose build trainer` (or
-  # `--profile build`) produces the image.
+  # Built by `docker compose up` so the image exists, then exits at once.
+  # The lifecycle orchestrator launches the real one-shot training container
+  # (name: systemone-trainer) through the Docker Engine API, only after the
+  # student has been stopped and GPU 0 VRAM verified empty.
   trainer:
     build:
       context: .
       dockerfile: docker/trainer/Dockerfile
     image: systemone/trainer:latest
-    profiles: ["build"]
+    container_name: systemone-trainer-image
+    entrypoint: ["python", "-c", "print('trainer image ready')"]
+    restart: "no"
 
 volumes:
   redis_data:

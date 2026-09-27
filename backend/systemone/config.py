@@ -62,7 +62,10 @@ class Settings(BaseSettings):
     oracle_url: str = "http://mac-m4.local:11434"
     oracle_model: str = "qwen3.8:27b"
     oracle_vision_model: str | None = None
-    # Adapter kinds: "openai" (vLLM / any OpenAI-compatible) or "ollama".
+    # Adapter kinds: "openai" (vLLM / any OpenAI-compatible) or "ollama"
+    # (plus any registered through the ``systemone.adapters`` entry points).
+    # Optional YAML/JSON file overriding the per-role endpoints (see adapters/byom.py).
+    byom_file: str | None = None
     student_adapter: str = "openai"
     triage_adapter: str = "openai"
     oracle_adapter: str = "ollama"

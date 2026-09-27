@@ -4,7 +4,6 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /app
 
 COPY backend/pyproject.toml /app/backend/pyproject.toml
-COPY README.md /app/README.md
 COPY backend/systemone /app/backend/systemone
 RUN pip install --no-cache-dir /app/backend
 

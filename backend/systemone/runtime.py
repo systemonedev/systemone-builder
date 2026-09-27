@@ -10,6 +10,7 @@ import asyncio
 import logging
 from typing import Any
 
+from systemone.adapters.byom import AdapterHandle, EndpointConfig, resolve
 from systemone.adapters.factory import build_adapter
 from systemone.config import Settings
 from systemone.datastore.replay_buffer import RedisReplayBuffer
@@ -54,10 +55,13 @@ class Runtime:
         self.prefix = PrefixTracker()
         self._extractors: dict[str, tuple[int, StateExtractor]] = {}
 
-        # ---- BYOM model endpoints
-        self.student = build_adapter(settings.student_adapter, settings.student_url, settings.student_served_name, settings.request_timeout_s)
-        self.triage = build_adapter(settings.triage_adapter, settings.triage_url, settings.triage_model, settings.request_timeout_s)
-        self.oracle = build_adapter(settings.oracle_adapter, settings.oracle_url, settings.oracle_model, settings.oracle_timeout_s)
+        # ---- BYOM model endpoints (env defaults < systemone.yaml < runtime overrides)
+        self.byom = resolve(settings)
+        if self.byom["student"].base_model:
+            settings.student_base_model = self.byom["student"].base_model
+        self.student = self._handle("student", self.byom["student"])
+        self.triage = self._handle("triage", self.byom["triage"])
+        self.oracle = self._handle("oracle", self.byom["oracle"])
 
         # ---- datasets, lifecycle, synthetic factory
         self.datasets = DatasetStore(settings.workspace / "datasets", self.store)
@@ -69,7 +73,8 @@ class Runtime:
             batch_size=settings.factory_batch_size, poll_interval_s=settings.factory_poll_interval_s,
             use_judge=settings.factory_judge, on_new_samples=self._maybe_auto_train,
         )
-        self.vision = VisionParser(self.oracle, settings.oracle_vision_model) if settings.oracle_vision_model else None
+        vision_model = self.byom["oracle"].vision_model
+        self.vision = VisionParser(self.oracle, vision_model) if vision_model else None
 
         # ---- Fast-Slow routing
         self.scorer = ConfidenceScorer(settings.confidence_logprob_weight)
@@ -137,6 +142,32 @@ class Runtime:
                     log.warning("auto-train skipped: %s", exc)
                 return
 
+    def _timeout(self, role: str) -> float:
+        return self.settings.oracle_timeout_s if role == "oracle" else self.settings.request_timeout_s
+
+    def _handle(self, role: str, cfg: EndpointConfig) -> AdapterHandle:
+        return AdapterHandle(role, build_adapter(cfg.adapter, cfg.url, cfg.model, self._timeout(role), cfg.api_key()), cfg)
+
+    async def swap_endpoint(self, role: str, patch: dict[str, Any], persist: bool = True) -> EndpointConfig:
+        handle: AdapterHandle = getattr(self, role)
+        cfg = handle.config.model_copy(update={k: v for k, v in patch.items() if v is not None})
+        inner = build_adapter(cfg.adapter, cfg.url, cfg.model, self._timeout(role), cfg.api_key())
+        await handle.swap(inner, cfg)
+        if role == "student" and cfg.base_model:
+            self.settings.student_base_model = cfg.base_model
+        if role == "oracle":
+            self.vision = VisionParser(self.oracle, cfg.vision_model) if cfg.vision_model else None
+            self.router.vision = self.vision
+        if persist:
+            await self.store.hset(("byom", "overrides"), role, cfg.model_dump())
+        self.bus.publish("system", "byom_swapped", role=role, adapter=cfg.adapter, url=cfg.url, model=cfg.model)
+        return cfg
+
+    async def _load_byom_overrides(self) -> None:
+        for role, cfg in (await self.store.hgetall(("byom", "overrides"))).items():
+            if role in ("student", "triage", "oracle"):
+                await self.swap_endpoint(role, cfg, persist=False)
+
     async def student_model_name(self) -> str:
         """Model id the student vLLM currently serves (base, LoRA or merged)."""
         return await self.store.get("lifecycle", "served_model", default=self.settings.student_served_name)
@@ -154,6 +185,7 @@ class Runtime:
     async def startup(self) -> None:
         await self.redis.ping()
         await self.domains.load()
+        await self._load_byom_overrides()
         await self._load_calibrations()
         self.escalations.start()
         self.telemetry.start()

@@ -1,0 +1,203 @@
+{
+  "id": "desktop_vision",
+  "name": "Desktop GUI via screenshots (spatial fallback)",
+  "description": "Native / canvas GUIs without accessibility tags: screenshots are vision-parsed on the Mac into bbox elements; the student acts with CLICK_XY or element ids.",
+  "kind": "computer_use",
+  "state_schema": {
+    "type": "object",
+    "required": [
+      "url",
+      "viewport_tree"
+    ],
+    "properties": {
+      "goal": {
+        "type": "string"
+      },
+      "url": {
+        "type": "string"
+      },
+      "temporal_buffer": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "viewport_tree": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": [
+            "id",
+            "role"
+          ],
+          "properties": {
+            "id": {
+              "type": "integer"
+            },
+            "role": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "value": {
+              "type": "string"
+            },
+            "bbox": {
+              "type": "array",
+              "items": {
+                "type": "integer"
+              },
+              "minItems": 4,
+              "maxItems": 4
+            },
+            "states": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "action_schema": {
+    "type": "object",
+    "required": [
+      "confidence_score",
+      "action"
+    ],
+    "properties": {
+      "confidence_score": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1
+      },
+      "action": {
+        "type": "string"
+      },
+      "target_id": {
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
+      "coordinates": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "x": {
+            "type": "integer"
+          },
+          "y": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "x",
+          "y"
+        ]
+      },
+      "text": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "supported_actions": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "supported_actions": [
+    "CLICK",
+    "TYPE",
+    "CLICK_XY",
+    "ESCALATE"
+  ],
+  "action_field": "action",
+  "threshold": 0.75,
+  "triage_threshold": null,
+  "triage_enabled": true,
+  "system_prompt": "You are a System-1 desktop GUI reflex agent. Elements come from a vision parser and carry pixel bounding boxes [x, y, width, height]. Prefer CLICK/TYPE with an element id; use CLICK_XY at the centre of the intended region when no element matches. ESCALATE on unexpected dialogs or when the goal is ambiguous.",
+  "few_shots": [
+    {
+      "state": {
+        "goal": "Open the File menu",
+        "url": "app://editor",
+        "viewport_tree": [
+          {
+            "id": 1,
+            "role": "menuitem",
+            "name": "File",
+            "bbox": [
+              8,
+              4,
+              36,
+              20
+            ]
+          },
+          {
+            "id": 2,
+            "role": "menuitem",
+            "name": "Edit",
+            "bbox": [
+              48,
+              4,
+              36,
+              20
+            ]
+          }
+        ],
+        "temporal_buffer": []
+      },
+      "action": {
+        "confidence_score": 0.94,
+        "action": "CLICK",
+        "target_id": 1
+      }
+    }
+  ],
+  "prompt_key_order": [
+    "goal",
+    "url",
+    "viewport_tree",
+    "temporal_buffer"
+  ],
+  "extractor": {
+    "type": "dom",
+    "drop_fields": [],
+    "preserve_fields": [],
+    "volatile_query_params": [],
+    "custom_patterns": [],
+    "tokenize_ips": false,
+    "tokenize_emails": true,
+    "normalize_counters": true,
+    "max_string_len": 512,
+    "max_nodes": 120,
+    "temporal_buffer_len": 6,
+    "log_format": "auto",
+    "payload_max": 512
+  },
+  "factory": {
+    "scenarios": [
+      "navigate a desktop application menu bar",
+      "fill a native settings dialog",
+      "dismiss a system permission prompt",
+      "click an icon-only toolbar button",
+      "recover from an unexpected modal error dialog",
+      "select a row in a canvas-rendered table"
+    ],
+    "seed_states_per_scenario": 20,
+    "temperature": 0.7,
+    "cot_max_tokens": 1024,
+    "judge_min_score": 0.7,
+    "replay_sample_rate": 0.05
+  }
+}

@@ -83,6 +83,21 @@ async def add_sample(domain_id: str, sample: ManualSample, rt: Runtime = Depends
     return {"added": added}
 
 
+@router.post("/datasets/{domain_id}/sft/bulk", status_code=201)
+async def add_samples_bulk(domain_id: str, samples: list[ManualSample], source: str = "import",
+                           rt: Runtime = Depends(get_rt)) -> dict[str, Any]:
+    domain = _domain(rt, domain_id)
+    added, errors = 0, []
+    for i, sample in enumerate(samples):
+        v = domain.validate_action(sample.action, sample.state)
+        if not v.ok or v.hallucinated:
+            errors.append({"index": i, "errors": v.errors + v.grounding_errors})
+            continue
+        added += await rt.datasets.add_sft(SFTSample(domain=domain_id, state=sample.state, action=v.action or sample.action,
+                                                     cot=sample.cot, source=source))
+    return {"added": added, "errors": errors}
+
+
 # ----------------------------------------------------------------- training
 class TrainRequest(BaseModel):
     domain: str

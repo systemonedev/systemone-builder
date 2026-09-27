@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from systemone import __version__
 from systemone.api.deps import require_api_key
-from systemone.api.routes import dashboard, extraction, feedback, replay, routing, system, training
+from systemone.api.routes import byom, dashboard, extraction, feedback, replay, routing, system, training
 from systemone.config import Settings, get_settings
 from systemone.runtime import Runtime
 
@@ -41,7 +41,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(system.public_router, prefix=API_PREFIX)
     app.include_router(dashboard.ws_router, prefix=API_PREFIX)  # auth checked in-handler
     auth = [Depends(require_api_key)]
-    for module in (system, replay, extraction, routing, training, feedback, dashboard):
+    for module in (system, replay, extraction, routing, training, feedback, dashboard, byom):
         app.include_router(module.router, prefix=API_PREFIX, dependencies=auth)
     return app
 
@@ -51,7 +51,8 @@ def main() -> None:
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     s = get_settings()
-    uvicorn.run(create_app(s), host=s.api_host, port=s.api_port, log_level="info")
+    # Single worker: the lifecycle lock, oracle waiters and WebSocket bus are in-process.
+    uvicorn.run(create_app(s), host=s.api_host, port=s.api_port, log_level="info", ws_ping_interval=20)
 
 
 if __name__ == "__main__":

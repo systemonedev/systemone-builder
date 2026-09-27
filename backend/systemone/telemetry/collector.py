@@ -23,7 +23,6 @@ import time
 from collections import deque
 from typing import Any
 
-from systemone.adapters.openai_compat import OpenAICompatAdapter
 from systemone.orchestrator.gpu import GpuMonitor
 from systemone.telemetry.bus import EventBus
 
@@ -59,7 +58,7 @@ def _first(metrics: dict[str, float], *names: str) -> float | None:
 class VllmScraper:
     """Derives an interval prefix-cache hit rate from vLLM counters."""
 
-    def __init__(self, adapter: OpenAICompatAdapter) -> None:
+    def __init__(self, adapter: Any) -> None:
         self.adapter = adapter
         self._prev: tuple[float, float] | None = None
 
@@ -105,9 +104,8 @@ class TelemetryCollector:
         self.bus = bus
         self.gpu = gpu
         self.interval_s = interval_s
-        self.scrapers = {
-            name: VllmScraper(a) for name, a in (("student", student), ("triage", triage)) if isinstance(a, OpenAICompatAdapter)
-        }
+        # Adapters may be BYOM handles; non-vLLM backends simply yield no metrics.
+        self.scrapers = {name: VllmScraper(a) for name, a in (("student", student), ("triage", triage))}
         self.samples: deque[dict[str, Any]] = deque(maxlen=history)
         self.decisions: deque[dict[str, Any]] = deque(maxlen=history * 4)
         self.losses: deque[dict[str, Any]] = deque(maxlen=5000)

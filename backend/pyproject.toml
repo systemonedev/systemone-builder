@@ -6,7 +6,6 @@ build-backend = "setuptools.build_meta"
 name = "systemone-builder"
 version = "1.0.0"
 description = "Open-source autonomous System-1 reflex model distillation framework"
-readme = "../README.md"
 requires-python = ">=3.11"
 license = { text = "Apache-2.0" }
 dependencies = [
