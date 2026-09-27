@@ -12,6 +12,9 @@ from typing import Any
 from systemone.config import Settings
 from systemone.datastore.replay_buffer import RedisReplayBuffer
 from systemone.datastore.store import JsonStore, create_redis
+from systemone.domains.registry import DomainRegistry
+from systemone.extraction.pipeline import StateExtractor
+from systemone.extraction.prompt import PrefixTracker
 from systemone.orchestrator.docker_ctl import DockerController
 from systemone.orchestrator.gpu import create_gpu_monitor
 from systemone.orchestrator.hardware import HardwareOrchestrator
@@ -35,8 +38,23 @@ class Runtime:
         self.docker = DockerController()
         self.hardware = HardwareOrchestrator(settings, self.gpu, self.docker)
 
+        self.domains = DomainRegistry(self.store, settings.data_dir / "domains")
+        self.prefix = PrefixTracker()
+        self._extractors: dict[str, tuple[int, StateExtractor]] = {}
+
+    def extractor(self, domain_id: str) -> StateExtractor:
+        """Cached per-domain extractor, rebuilt when the domain spec changes."""
+        spec = self.domains.get(domain_id)
+        key = hash(spec.model_dump_json())
+        cached = self._extractors.get(domain_id)
+        if cached is None or cached[0] != key:
+            cached = (key, StateExtractor(spec))
+            self._extractors[domain_id] = cached
+        return cached[1]
+
     async def startup(self) -> None:
         await self.redis.ping()
+        await self.domains.load()
 
     async def shutdown(self) -> None:
         await self.redis.aclose()
