@@ -131,21 +131,20 @@ services:
 
   # ------------------------------------------ GPU 1: Container C (triage)
   triage:
-    image: vllm/vllm-openai:latest
+    image: systemone/student:latest   # same vLLM launcher, triage role
     container_name: systemone-triage
     env_file: [{ path: .env, required: false }]
     environment:
+      S1_VLLM_ROLE: triage
+      S1_TRIAGE_MODEL: ${S1_TRIAGE_MODEL:-Qwen/Qwen2.5-14B-Instruct-AWQ}
+      S1_GPU_MEMORY_UTILIZATION: ${S1_TRIAGE_GPU_MEMORY_UTILIZATION:-0.90}
+      S1_MAX_MODEL_LEN: ${S1_TRIAGE_MAX_MODEL_LEN:-16384}
+      S1_KV_OFFLOAD_GB: ${S1_TRIAGE_KV_OFFLOAD_GB:-16}
+      S1_VLLM_EXTRA_ARGS: ${S1_TRIAGE_VLLM_EXTRA_ARGS:-}
       HF_HOME: /workspace/hf_cache
       HF_TOKEN: ${HF_TOKEN:-}
-    command:
-      - ${S1_TRIAGE_MODEL:-Qwen/Qwen2.5-14B-Instruct-AWQ}
-      - --host=0.0.0.0
-      - --port=8000
-      - --gpu-memory-utilization=0.90
-      - --max-model-len=16384
-      - --enable-prefix-caching
-      - --enable-prompt-tokens-details
-      - --swap-space=16
+    depends_on:
+      - student   # ensures the shared launcher image is built first
     volumes:
       - ./workspace:/workspace
     ports:

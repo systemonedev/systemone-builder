@@ -1,61 +1,105 @@
-"""Container B entrypoint: launch the vLLM student runner on GPU 0.
+"""vLLM launcher for Container B (student, GPU 0) and Container C (triage, GPU 1).
 
-The lifecycle orchestrator hot-reloads new weights by rewriting
-``/workspace/state/student.json`` and restarting this container:
+Student: the lifecycle orchestrator hot-reloads new weights by rewriting
+``/workspace/state/student.json`` and restarting the container:
 
     {"model": "/workspace/runs/<run>/merged",      # or a Hugging Face id
      "served_name": "student",
      "lora": {"name": "student-<run>", "path": "/workspace/runs/<run>/adapter"} | null}
 
-Tuning for the sub-100ms reflex path:
+Triage (``S1_VLLM_ROLE=triage``): serves ``S1_TRIAGE_MODEL`` under its own id.
+
+vLLM's CLI changes between releases (e.g. ``--swap-space`` was removed), so
+optional tuning flags are checked against the installed version's
+``vllm serve --help`` output and unsupported ones are dropped with a warning
+instead of crashing the container:
 
 * ``--enable-prefix-caching`` - automatic KV-cache sharing across requests
-  that share the (scrubbed, canonical) prompt prefix.
-* CPU KV-cache offload into the 120GB system RAM (``S1_KV_OFFLOAD_GB``) so
-  evicted prefix blocks are swapped out instead of recomputed.
-* ``--enable-prompt-tokens-details`` - report cached tokens per request.
+* CPU KV-cache offload into system RAM (``S1_KV_OFFLOAD_GB``)
+* ``--enable-prompt-tokens-details`` - report cached tokens per request
 """
 
 from __future__ import annotations
 
 import json
 import os
+import re
 import shlex
+import subprocess
 from pathlib import Path
 
 STATE = Path(os.environ.get("S1_STUDENT_STATE", "/workspace/state/student.json"))
+ROLE = os.environ.get("S1_VLLM_ROLE", "student")
+
+
+def env(name: str, default: str) -> str:
+    return os.environ.get(name) or default
+
+
+def supported_flags() -> set[str] | None:
+    """Flags accepted by the installed ``vllm serve`` (None if undetectable)."""
+    for args in (["vllm", "serve", "--help=all"], ["vllm", "serve", "--help"]):
+        try:
+            out = subprocess.run(args, capture_output=True, text=True, timeout=180)
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        text = out.stdout + out.stderr
+        flags = set(re.findall(r"(?<![\w-])(--[a-z0-9][a-z0-9-]*)", text))
+        if "--max-model-len" in flags:
+            return flags
+    return None
 
 
 def main() -> None:
-    state = {}
-    if STATE.exists():
-        state = json.loads(STATE.read_text())
-    model = state.get("model") or os.environ.get("S1_STUDENT_BASE_MODEL", "Qwen/Qwen2.5-1.5B-Instruct")
-    served = state.get("served_name") or os.environ.get("S1_STUDENT_SERVED_NAME", "student")
-    args = [
+    if ROLE == "triage":
+        model = env("S1_TRIAGE_MODEL", "Qwen/Qwen2.5-14B-Instruct-AWQ")
+        served, lora = model, None
+        defaults = {"util": "0.90", "len": "16384", "offload": "16"}
+    else:
+        state = json.loads(STATE.read_text()) if STATE.exists() else {}
+        model = state.get("model") or env("S1_STUDENT_BASE_MODEL", "Qwen/Qwen2.5-1.5B-Instruct")
+        served = state.get("served_name") or env("S1_STUDENT_SERVED_NAME", "student")
+        lora = state.get("lora")
+        defaults = {"util": "0.85", "len": "8192", "offload": "32"}
+
+    required = [
         "vllm", "serve", model,
         "--host", "0.0.0.0",
-        "--port", os.environ.get("S1_VLLM_PORT", "8000"),
+        "--port", env("S1_VLLM_PORT", "8000"),
         "--served-model-name", served,
-        "--gpu-memory-utilization", os.environ.get("S1_GPU_MEMORY_UTILIZATION", "0.85"),
-        "--max-model-len", os.environ.get("S1_MAX_MODEL_LEN", "8192"),
-        "--enable-prefix-caching",
-        "--enable-prompt-tokens-details",
-        "--swap-space", os.environ.get("S1_SWAP_SPACE_GB", "16"),
-        "--max-num-seqs", os.environ.get("S1_MAX_NUM_SEQS", "64"),
-        "--generation-config", "vllm",
+        "--gpu-memory-utilization", env("S1_GPU_MEMORY_UTILIZATION", defaults["util"]),
+        "--max-model-len", env("S1_MAX_MODEL_LEN", defaults["len"]),
     ]
-    offload = os.environ.get("S1_KV_OFFLOAD_GB", "32")
-    if offload and offload != "0":
-        args += ["--kv-offloading-backend", os.environ.get("S1_KV_OFFLOAD_BACKEND", "native"),
-                 "--kv-offloading-size", offload]
-    lora = state.get("lora")
+    # (flag, value or None) - each dropped if this vLLM does not know it
+    optional: list[tuple[str, str | None]] = [
+        ("--enable-prefix-caching", None),
+        ("--enable-prompt-tokens-details", None),
+        ("--max-num-seqs", env("S1_MAX_NUM_SEQS", "64")),
+        ("--generation-config", "vllm"),
+    ]
+    offload = env("S1_KV_OFFLOAD_GB", defaults["offload"])
+    if offload != "0":
+        optional += [("--kv-offloading-backend", env("S1_KV_OFFLOAD_BACKEND", "native")),
+                     ("--kv-offloading-size", offload)]
+    swap = os.environ.get("S1_SWAP_SPACE_GB")  # only for older vLLM releases
+    if swap:
+        optional.append(("--swap-space", swap))
     if lora:
         os.environ["VLLM_ALLOW_RUNTIME_LORA_UPDATING"] = "True"
-        args += ["--enable-lora", "--max-lora-rank", os.environ.get("S1_MAX_LORA_RANK", "64"),
-                 "--lora-modules", f"{lora['name']}={lora['path']}"]
+        optional += [("--enable-lora", None), ("--max-lora-rank", env("S1_MAX_LORA_RANK", "64")),
+                     ("--lora-modules", f"{lora['name']}={lora['path']}")]
+
+    flags = supported_flags()
+    args = list(required)
+    for flag, value in optional:
+        if flags is not None and flag not in flags:
+            if flag in ("--enable-lora", "--lora-modules"):
+                raise SystemExit(f"[serve_{ROLE}] this vLLM does not support {flag}; set S1_RELOAD_MODE=merged")
+            print(f"[serve_{ROLE}] warning: installed vLLM does not support {flag}; skipping", flush=True)
+            continue
+        args += [flag] + ([value] if value is not None else [])
     args += shlex.split(os.environ.get("S1_VLLM_EXTRA_ARGS", ""))
-    print("[serve_student] exec:", " ".join(shlex.quote(a) for a in args), flush=True)
+    print(f"[serve_{ROLE}] exec:", " ".join(shlex.quote(a) for a in args), flush=True)
     os.execvp(args[0], args)
 
 
