@@ -1,0 +1,143 @@
+{
+  "id": "auth_log_bruteforce",
+  "name": "SSH / auth-log brute-force reflex",
+  "description": "Triage sshd/sudo/PAM syslog lines and block credential-stuffing sources while never blocking the management subnet.",
+  "kind": "secops",
+  "state_schema": {
+    "type": "object",
+    "required": [
+      "source",
+      "payload_snippet"
+    ],
+    "properties": {
+      "source": {
+        "type": "string"
+      },
+      "src_ip": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "payload_snippet": {
+        "type": "string"
+      }
+    }
+  },
+  "action_schema": {
+    "type": "object",
+    "required": [
+      "confidence_score",
+      "verdict",
+      "immediate_action",
+      "target_ioc"
+    ],
+    "properties": {
+      "confidence_score": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1
+      },
+      "verdict": {
+        "type": "string",
+        "enum": [
+          "BENIGN",
+          "SUSPICIOUS",
+          "MALICIOUS"
+        ]
+      },
+      "immediate_action": {
+        "type": "string"
+      },
+      "target_ioc": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "supported_actions": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "supported_actions": [
+    "DROP_AND_BLACKLIST_IP",
+    "ESCALATE",
+    "ALLOW"
+  ],
+  "action_field": "immediate_action",
+  "threshold": 0.93,
+  "triage_threshold": null,
+  "triage_enabled": true,
+  "system_prompt": "You are a System-1 auth-log reflex agent. Repeated failed logins for root, invalid users or many accounts from one external source are brute force: DROP_AND_BLACKLIST_IP. Successful logins, single typos and internal management addresses are ALLOW. Anything involving privilege escalation (sudo, su) with unclear intent: ESCALATE.",
+  "few_shots": [
+    {
+      "state": {
+        "source": "syslog",
+        "program": "sshd",
+        "host": "bastion",
+        "src_ip": "203.0.113.77",
+        "payload_snippet": "Failed password for invalid user oracle from 203.0.113.77 port 51122 ssh2"
+      },
+      "action": {
+        "confidence_score": 0.96,
+        "verdict": "MALICIOUS",
+        "immediate_action": "DROP_AND_BLACKLIST_IP",
+        "target_ioc": [
+          "203.0.113.77"
+        ]
+      }
+    }
+  ],
+  "prompt_key_order": [
+    "source",
+    "program",
+    "host",
+    "src_ip",
+    "payload_snippet"
+  ],
+  "extractor": {
+    "type": "log",
+    "drop_fields": [],
+    "preserve_fields": [
+      "src_ip",
+      "source",
+      "program",
+      "host"
+    ],
+    "volatile_query_params": [],
+    "custom_patterns": [
+      [
+        "\\bport \\d{4,5}\\b",
+        "port <EPHEMERAL>"
+      ]
+    ],
+    "tokenize_ips": false,
+    "tokenize_emails": false,
+    "normalize_counters": false,
+    "max_string_len": 512,
+    "max_nodes": 150,
+    "temporal_buffer_len": 8,
+    "log_format": "syslog",
+    "payload_max": 512
+  },
+  "factory": {
+    "scenarios": [
+      "ssh password spraying across many usernames",
+      "single user typing a wrong password once",
+      "successful key-based login after failures",
+      "sudo authentication failure by an admin",
+      "invalid user enumeration from a cloud IP",
+      "monitoring probe from the management subnet",
+      "PAM account lockout message"
+    ],
+    "seed_states_per_scenario": 20,
+    "temperature": 0.7,
+    "cot_max_tokens": 1024,
+    "judge_min_score": 0.7,
+    "replay_sample_rate": 0.05
+  }
+}

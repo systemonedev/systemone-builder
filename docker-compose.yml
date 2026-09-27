@@ -1,0 +1,183 @@
+# systemone-builder - Linux host stack (2x RTX 3090, 120GB RAM)
+name: systemone
+
+x-s1-env: &s1-env
+  S1_REDIS_URL: redis://redis:6379/0
+  S1_DATA_DIR: /data
+  S1_WORKSPACE_HOST_PATH: ${PWD}/workspace
+  S1_STUDENT_URL: http://student:8000/v1
+  S1_TRIAGE_URL: http://triage:8000/v1
+
+services:
+  # ------------------------------------------------------------ RAM datastore
+  redis:
+    image: redis:7.4
+    container_name: systemone-redis
+    command: ["redis-server", "/usr/local/etc/redis/redis.conf"]
+    volumes:
+      - ./docker/redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    ulimits:
+      nofile: 65535
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # ------------------------------------------------- orchestrator + LAN API
+  api:
+    build:
+      context: .
+      dockerfile: docker/api/Dockerfile
+    image: systemone/api:latest
+    container_name: systemone-api
+    env_file: [{ path: .env, required: false }]
+    environment:
+      <<: *s1-env
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: utility
+    # host PID namespace so NVML can attribute VRAM to processes
+    pid: host
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./workspace:/data/workspace
+      - ./var/eval_results:/data/eval_results
+      - ./var/domains:/data/domains
+    ports:
+      - "8000:8000"
+    depends_on:
+      redis: { condition: service_healthy }
+      student: { condition: service_started }
+      triage: { condition: service_started }
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [utility]
+    restart: unless-stopped
+
+  # ------------------------------------------ Zero-to-One Quickstart (one-shot)
+  # Loads the dummy web-automation dataset, runs the first strict
+  # train -> hot-reload cycle on the tiny 1.5B student and benchmarks it.
+  # Idempotent: on later `docker compose up` runs it detects the loaded
+  # dataset / finished run and exits. Disable with S1_QUICKSTART=0.
+  quickstart:
+    image: systemone/api:latest
+    container_name: systemone-quickstart
+    env_file: [{ path: .env, required: false }]
+    environment:
+      S1_API: http://api:8000
+      S1_PUBLIC_HOST: ${S1_PUBLIC_HOST:-localhost}
+      S1_QUICKSTART: ${S1_QUICKSTART:-1}
+    entrypoint: ["sh", "-c", "[ \"$$S1_QUICKSTART\" = \"0\" ] && echo 'quickstart disabled' || exec systemone quickstart"]
+    depends_on:
+      api: { condition: service_healthy }
+    restart: "no"
+
+  # ----------------------------------------------- unified web dashboard
+  dashboard:
+    build:
+      context: .
+      dockerfile: docker/dashboard/Dockerfile
+      args:
+        # empty = same host as the dashboard, port 8000 (works across the LAN)
+        NEXT_PUBLIC_S1_API_URL: ${S1_PUBLIC_API_URL:-}
+    image: systemone/dashboard:latest
+    container_name: systemone-dashboard
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  # ------------------------------------------ GPU 0: Container B (student)
+  student:
+    build:
+      context: .
+      dockerfile: docker/student/Dockerfile
+    image: systemone/student:latest
+    container_name: systemone-student
+    env_file: [{ path: .env, required: false }]
+    environment:
+      S1_STUDENT_BASE_MODEL: ${S1_STUDENT_BASE_MODEL:-Qwen/Qwen2.5-1.5B-Instruct}
+      S1_KV_OFFLOAD_GB: ${S1_KV_OFFLOAD_GB:-32}
+      HF_HOME: /workspace/hf_cache
+      HF_TOKEN: ${HF_TOKEN:-}
+    volumes:
+      - ./workspace:/workspace
+    ports:
+      - "8001:8000"
+    ipc: host
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["0"]
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      start_period: 300s
+      retries: 30
+    # The lifecycle orchestrator stops/starts this container around training;
+    # never let Docker restart it behind the orchestrator's back.
+    restart: "no"
+
+  # ------------------------------------------ GPU 1: Container C (triage)
+  triage:
+    image: vllm/vllm-openai:latest
+    container_name: systemone-triage
+    env_file: [{ path: .env, required: false }]
+    environment:
+      HF_HOME: /workspace/hf_cache
+      HF_TOKEN: ${HF_TOKEN:-}
+    command:
+      - ${S1_TRIAGE_MODEL:-Qwen/Qwen2.5-14B-Instruct-AWQ}
+      - --host=0.0.0.0
+      - --port=8000
+      - --gpu-memory-utilization=0.90
+      - --max-model-len=16384
+      - --enable-prefix-caching
+      - --enable-prompt-tokens-details
+      - --swap-space=16
+    volumes:
+      - ./workspace:/workspace
+    ports:
+      - "8002:8000"
+    ipc: host
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["1"]
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      start_period: 600s
+      retries: 60
+    restart: unless-stopped
+
+  # ------------------------------------------ GPU 0: Container A (trainer)
+  # Built by `docker compose up` so the image exists, then exits at once.
+  # The lifecycle orchestrator launches the real one-shot training container
+  # (name: systemone-trainer) through the Docker Engine API, only after the
+  # student has been stopped and GPU 0 VRAM verified empty.
+  trainer:
+    build:
+      context: .
+      dockerfile: docker/trainer/Dockerfile
+    image: systemone/trainer:latest
+    container_name: systemone-trainer-image
+    entrypoint: ["python", "-c", "print('trainer image ready')"]
+    restart: "no"
+
+volumes:
+  redis_data:

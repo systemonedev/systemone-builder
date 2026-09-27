@@ -102,3 +102,9 @@ Thumbs.db
 .idea/
 *.swp
 *.swo
+# systemone runtime state
+workspace/
+*.rdb
+*.aof
+appendonlydir/
+*.tsbuildinfo
