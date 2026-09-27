@@ -89,6 +89,44 @@ def warn_slow_storage() -> None:
         )
 
 
+SHM = "/dev/shm"
+
+
+def clean_stale_offload_files() -> None:
+    """Remove vLLM CPU-offload regions left in /dev/shm by crashed engines.
+
+    With ``ipc: host`` every vLLM container shares the host's /dev/shm (RAM-backed
+    tmpfs). An engine that dies after creating its region can leave a file of
+    tens of GB behind; it survives container restarts and the next start fails
+    with ``OSError: [Errno 28] No space left on device``. Unlinking is safe even
+    for a region a running engine has mapped: its mapping stays valid and the
+    memory is released when that process exits.
+    """
+    freed = 0
+    try:
+        names = os.listdir(SHM)
+    except OSError:
+        return
+    for name in names:
+        if name.startswith(("vllm_offload_", "s1_offload_probe_")):
+            path = os.path.join(SHM, name)
+            try:
+                freed += os.stat(path).st_size
+                os.unlink(path)
+            except OSError:
+                pass
+    if freed:
+        print(f"[serve_{ROLE}] removed stale vLLM offload files from {SHM} ({freed / 1024**3:.1f} GB)", flush=True)
+
+
+def shm_free_gb() -> float:
+    try:
+        st = os.statvfs(SHM)
+        return st.f_bavail * st.f_frsize / 1024**3
+    except OSError:
+        return 0.0
+
+
 def probe_offload_gb(requested: int) -> int:
     """Largest CPU KV offload region (GB) the kernel can actually back.
 
@@ -98,7 +136,11 @@ def probe_offload_gb(requested: int) -> int:
     the engine dies after the model has loaded. Probe with the same call first
     and halve the size until it succeeds.
     """
-    size = requested
+    free = shm_free_gb()
+    # leave headroom in /dev/shm for NCCL/IPC and a co-located vLLM instance
+    cap = int(free * float(os.environ.get("S1_KV_OFFLOAD_MAX_SHM_FRACTION", "0.45")))
+    size = min(requested, cap)
+    print(f"[serve_{ROLE}] {SHM}: {free:.1f} GB free; offload capped at {size} GB (requested {requested} GB)", flush=True)
     populate = getattr(mmap, "MADV_POPULATE_WRITE", 23)
     while size >= 1:
         path = f"/dev/shm/s1_offload_probe_{os.getpid()}"
@@ -124,6 +166,8 @@ def probe_offload_gb(requested: int) -> int:
 
 def main() -> None:
     warn_slow_storage()
+    if os.environ.get("S1_CLEAN_SHM", "1") != "0":
+        clean_stale_offload_files()
     if in_wsl() and "VLLM_WSL2_ENABLE_PIN_MEMORY" not in os.environ:
         # vLLM disables pinned memory under WSL2 by default, and its V2 model
         # runner cannot start without it ("RuntimeError: UVA is not available").
