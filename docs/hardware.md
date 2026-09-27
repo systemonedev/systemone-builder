@@ -14,14 +14,20 @@
 | Consumer | Budget | Setting |
 |---|---|---|
 | Redis (replay, queues, datasets index) | 64 GB | `docker/redis/redis.conf` `maxmemory` |
-| Student vLLM CPU KV offload + swap | 32 GB + 16 GB | `S1_KV_OFFLOAD_GB`, `S1_SWAP_SPACE_GB` |
-| Triage vLLM swap | 16 GB | `--swap-space` in `docker-compose.yml` |
+| Student vLLM CPU KV offload | 32 GB | `S1_KV_OFFLOAD_GB` |
+| Triage vLLM CPU KV offload | 16 GB | `S1_TRIAGE_KV_OFFLOAD_GB` |
 | OS, Docker, API, trainer dataloaders | ~8 GB | |
 
+Both vLLM containers start through `docker/student/serve_student.py`. It checks every
+optional tuning flag against the installed `vllm serve --help` output and skips the ones
+that version doesn't support, logging a warning. Upgrading or downgrading the
+`vllm/vllm-openai` image therefore never breaks startup because of a renamed or removed flag.
+
 CPU KV offload uses vLLM's native offloading backend (`--kv-offloading-backend native
---kv-offloading-size`). On a vLLM build without it, set `S1_KV_OFFLOAD_GB=0` and pass your
-connector through `S1_VLLM_EXTRA_ARGS` instead, e.g. LMCache:
+--kv-offloading-size`). If your build lacks it, the flags are skipped; you can pass another
+connector through `S1_VLLM_EXTRA_ARGS` (triage: `S1_TRIAGE_VLLM_EXTRA_ARGS`), e.g. LMCache:
 `--kv-transfer-config '{"kv_connector":"LMCacheConnectorV1","kv_role":"kv_both"}'`.
+Older vLLM releases that still have `--swap-space` can use it via `S1_SWAP_SPACE_GB`.
 
 ## Linux prerequisites
 
