@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import os
+import platform
 import re
 import shlex
 import subprocess
@@ -50,7 +51,20 @@ def supported_flags() -> set[str] | None:
     return None
 
 
+def in_wsl() -> bool:
+    # Same test vLLM uses (vllm/platforms/interface.py); inside a container the
+    # kernel string is the host's, so this also detects Docker Desktop / WSL2.
+    return "microsoft" in " ".join(platform.uname()).lower()
+
+
 def main() -> None:
+    if in_wsl() and "VLLM_WSL2_ENABLE_PIN_MEMORY" not in os.environ:
+        # vLLM disables pinned memory under WSL2 by default, and its V2 model
+        # runner cannot start without it ("RuntimeError: UVA is not available").
+        # WSL2 kernels >= 4.19.121 support pinned memory; set
+        # VLLM_WSL2_ENABLE_PIN_MEMORY=0 explicitly to opt out.
+        os.environ["VLLM_WSL2_ENABLE_PIN_MEMORY"] = "1"
+        print(f"[serve_{ROLE}] WSL2 kernel detected ({platform.release()}): enabling VLLM_WSL2_ENABLE_PIN_MEMORY=1", flush=True)
     if ROLE == "triage":
         model = env("S1_TRIAGE_MODEL", "Qwen/Qwen2.5-14B-Instruct-AWQ")
         served, lora = model, None

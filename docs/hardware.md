@@ -29,6 +29,18 @@ connector through `S1_VLLM_EXTRA_ARGS` (triage: `S1_TRIAGE_VLLM_EXTRA_ARGS`), e.
 `--kv-transfer-config '{"kv_connector":"LMCacheConnectorV1","kv_role":"kv_both"}'`.
 Older vLLM releases that still have `--swap-space` can use it via `S1_SWAP_SPACE_GB`.
 
+## WSL2 / Docker Desktop hosts
+
+vLLM disables pinned host memory under WSL2 by default, and its V2 model runner then fails
+with `RuntimeError: UVA is not available`. The launcher detects a WSL2 kernel and sets
+`VLLM_WSL2_ENABLE_PIN_MEMORY=1`. This needs WSL2 kernel ≥ 4.19.121; run `wsl --update` if
+yours is older, or set the variable to `0` in `.env` to opt out.
+
+WSL2 limits how much host memory can be pinned. If a vLLM container fails while allocating
+the CPU KV offload buffer, lower `S1_KV_OFFLOAD_GB` / `S1_TRIAGE_KV_OFFLOAD_GB` (or set them
+to `0`). Also raise the VM's memory in `%UserProfile%\.wslconfig` (`memory=`) so that Redis's
+64 GB and the offload buffers fit.
+
 ## Linux prerequisites
 
 * NVIDIA driver ≥ 550, NVIDIA Container Toolkit, Docker Engine + Compose v2
