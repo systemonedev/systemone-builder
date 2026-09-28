@@ -187,6 +187,7 @@ class Runtime:
     async def startup(self) -> None:
         await self.redis.ping()
         await self.domains.load()
+        await self._reconcile_datasets()
         await self._load_byom_overrides()
         await self._load_calibrations()
         self.escalations.start()
@@ -207,6 +208,13 @@ class Runtime:
         if info.status in ("exited", "created"):
             log.info("starting student container %s", self.settings.student_container)
             await self.docker.start(self.settings.student_container)
+
+    async def _reconcile_datasets(self) -> None:
+        for did in sorted({d.id for d in self.domains.all()} | set(self.datasets.domains_on_disk())):
+            report = await self.datasets.reconcile(did)
+            drift = {k: v for k, v in report.items() if v["before"] != v["after"]}
+            if drift:
+                log.warning("dataset index for %s rebuilt from files: %s", did, drift)
 
     async def _load_calibrations(self) -> None:
         from systemone.routing.confidence import Calibration

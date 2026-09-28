@@ -94,14 +94,54 @@ class DatasetStore:
         await self.store.incr("dataset", domain, split, "count")
         return True
 
+    @staticmethod
+    def dedup_key(split: Split, row: dict[str, Any]) -> str:
+        if split == "sft":
+            return sample_key(row["state"], row["action"])
+        if split == "dpo":
+            return sample_key(row["state"], row["chosen"]) + sample_key(row["state"], row["rejected"])[:6]
+        return sample_key(row["state"])
+
     async def add_sft(self, s: SFTSample) -> bool:
-        return await self._append(s.domain, "sft", s, sample_key(s.state, s.action))
+        return await self._append(s.domain, "sft", s, self.dedup_key("sft", s.model_dump()))
 
     async def add_dpo(self, p: DPOPair) -> bool:
-        return await self._append(p.domain, "dpo", p, sample_key(p.state, p.chosen) + sample_key(p.state, p.rejected)[:6])
+        return await self._append(p.domain, "dpo", p, self.dedup_key("dpo", p.model_dump()))
 
     async def add_heldout(self, h: HeldOutSample) -> bool:
-        return await self._append(h.domain, "heldout", h, sample_key(h.state))
+        return await self._append(h.domain, "heldout", h, self.dedup_key("heldout", h.model_dump()))
+
+    def domains_on_disk(self) -> list[str]:
+        return sorted(p.name for p in self.root.iterdir() if p.is_dir()) if self.root.exists() else []
+
+    async def reconcile(self, domain: str) -> dict[str, dict[str, int]]:
+        """Rebuild the Redis counters and dedup keys from the JSONL files.
+
+        The files are the source of truth. Redis can drift from them when the
+        workspace volume changes, files are edited or deleted by hand, or Redis
+        persisted state from an older workspace. Without this, the counters
+        report samples that no longer exist and the dedup keys reject
+        re-imports of them.
+        """
+        report: dict[str, dict[str, int]] = {}
+        for split in ("sft", "dpo", "heldout"):
+            keys = [self.dedup_key(split, row) for row in self.iter(domain, split)]  # type: ignore[arg-type]
+            before = await self.count(domain, split)  # type: ignore[arg-type]
+            k_keys = self.store.key("dataset", domain, split, "keys")
+            pipe = self.store.r.pipeline()
+            pipe.delete(k_keys)
+            if keys:
+                pipe.sadd(k_keys, *keys)
+            pipe.set(self.store.key("dataset", domain, split, "count"), len(keys))
+            await pipe.execute()
+            report[split] = {"before": before, "after": len(keys)}
+        trained = await self.store.get("dataset", domain, "trained_upto", default=0)
+        if trained > report["sft"]["after"]:
+            await self.mark_trained(domain, report["sft"]["after"])
+        dpo_trained = await self.store.get("dataset", domain, "dpo_trained_upto", default=0)
+        if dpo_trained > report["dpo"]["after"]:
+            await self.store.set(report["dpo"]["after"], "dataset", domain, "dpo_trained_upto")
+        return report
 
     async def count(self, domain: str, split: Split) -> int:
         return await self.store.counter("dataset", domain, split, "count")

@@ -82,6 +82,9 @@ def run(api: str, api_key: str | None = None, n_train: int = 600, n_heldout: int
     wait_for(lambda: c.get("/health/deep")["student"].get("ok"), "vLLM student (first start downloads the 1.5B model)", student_timeout_s, 10)
     say("student vLLM is serving")
 
+    # Counters live in Redis, samples on the workspace volume: make sure they agree
+    # before deciding the dataset is already loaded.
+    c.post(f"/datasets/{DOMAIN}/reconcile")
     stats = c.get(f"/datasets/{DOMAIN}")
     if stats["sft"] >= n_train and stats["heldout"] >= n_heldout:
         say(f"dataset already loaded ({stats['sft']} SFT / {stats['heldout']} held-out) - skipping")

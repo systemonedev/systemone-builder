@@ -218,6 +218,7 @@ To compare against the teachers, run the same benchmark with target **triage** a
 |---|---|
 | Weights load at a few MB/s, shards stuck at 0% | The workspace is on a host-shared filesystem (the launcher logs a WARNING). Unset `S1_WORKSPACE_VOLUME` to use the named volume. |
 | `OSError: [Errno 14] Bad address` in `shared_offload_region` | The kernel couldn't back the CPU KV offload region. The launcher now probes and shrinks it automatically (look for `CPU KV offload probe` lines). To pin a size yourself, set `S1_KV_OFFLOAD_GB` / `S1_TRIAGE_KV_OFFLOAD_GB` (`0` disables offload). |
+| `OSError: [Errno 28] No space left on device` in the engine | `/dev/shm` (shared RAM tmpfs, not your disk) is full of offload files left by earlier crashes. The launcher now removes them and caps offload at 45% of free `/dev/shm`. To clean up by hand: `docker compose stop student triage`, then in WSL `sudo rm -f /dev/shm/vllm_offload_*`. Check with `df -h /dev/shm`. |
 | `UVA is not available` | Pinned memory is disabled (WSL2). The launcher enables it; run `wsl --update` if your kernel is older than 4.19.121. |
 | `unrecognized arguments` from vLLM | Rebuild the launcher image (`docker compose build student`) and recreate the containers (`docker compose up -d --force-recreate student triage`). |
 | Training cycle rolled back | See the run's error on *Factory & Training*. `docker compose logs api` has the full trace. If a reload times out, increase `S1_STUDENT_START_TIMEOUT_S`. |

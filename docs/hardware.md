@@ -45,7 +45,12 @@ launcher logs a warning when it detects this.
 can refuse to back it (`OSError: [Errno 14] Bad address`). Before starting vLLM, the launcher
 performs the same `madvise(MADV_POPULATE_WRITE)` call vLLM uses, halving the size until it
 succeeds, or disabling offload if nothing fits. You can set the sizes explicitly with
-`S1_KV_OFFLOAD_GB` / `S1_TRIAGE_KV_OFFLOAD_GB`; `S1_KV_OFFLOAD_PROBE=0` skips the probe. Also raise the VM's memory in `%UserProfile%\.wslconfig` (`memory=`) so that Redis's
+`S1_KV_OFFLOAD_GB` / `S1_TRIAGE_KV_OFFLOAD_GB`; `S1_KV_OFFLOAD_PROBE=0` skips the probe.
+
+Both vLLM containers use `ipc: host`, so offload regions live in the host's `/dev/shm`,
+which WSL2 sizes at half the VM's memory by default. The launcher removes offload files left
+by crashed engines (`S1_CLEAN_SHM=0` disables this). It also caps each instance at 45% of the
+free `/dev/shm` (`S1_KV_OFFLOAD_MAX_SHM_FRACTION`), so student and triage both fit. Also raise the VM's memory in `%UserProfile%\.wslconfig` (`memory=`) so that Redis's
 64 GB and the offload buffers fit.
 
 ## Linux prerequisites

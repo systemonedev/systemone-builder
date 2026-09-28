@@ -59,6 +59,13 @@ async def dataset_stats(domain_id: str, rt: Runtime = Depends(get_rt)) -> dict[s
     return await rt.datasets.stats(domain_id)
 
 
+@router.post("/datasets/{domain_id}/reconcile")
+async def dataset_reconcile(domain_id: str, rt: Runtime = Depends(get_rt)) -> dict[str, Any]:
+    """Rebuild counters and dedup keys from the dataset files on disk."""
+    _domain(rt, domain_id)
+    return await rt.datasets.reconcile(domain_id)
+
+
 @router.get("/datasets/{domain_id}/{split}")
 async def dataset_tail(domain_id: str, split: Literal["sft", "dpo", "heldout"], n: int = 50,
                        rt: Runtime = Depends(get_rt)) -> list[dict[str, Any]]:
