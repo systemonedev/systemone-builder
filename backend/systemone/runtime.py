@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Any
 
 from systemone.adapters.byom import AdapterHandle, EndpointConfig, resolve
@@ -208,6 +209,47 @@ class Runtime:
         if info.status in ("exited", "created"):
             log.info("starting student container %s", self.settings.student_container)
             await self.docker.start(self.settings.student_container)
+
+    async def activity(self) -> dict[str, Any]:
+        """Everything the system is doing right now, for the dashboard banner."""
+        now = time.time()
+        items: list[dict[str, Any]] = []
+        lc = await self.lifecycle.status()
+        runs = await self.lifecycle.runs(5)
+        if self.lifecycle.busy or lc.get("phase") not in ("serving", None):
+            run = next((r for r in runs if r["run_id"] == lc.get("run_id")), runs[0] if runs else {})
+            metrics = await self.lifecycle.run_metrics(run["run_id"]) if run.get("run_id") else []
+            last = metrics[-1] if metrics else {}
+            items.append({
+                "kind": "training", "state": "failed" if lc.get("phase") == "failed" else "running",
+                "title": f"Training cycle {run.get('run_id', '')}".strip(),
+                "phase": lc.get("phase"), "domain": run.get("domain"), "mode": run.get("mode"),
+                "started_at": run.get("created_at"), "step": last.get("step"), "max_steps": last.get("max_steps"),
+                "loss": last.get("loss"), "error": lc.get("error"),
+            })
+        elif runs and runs[0].get("finished_at") and now - runs[0]["finished_at"] < 900:
+            r = runs[0]
+            items.append({
+                "kind": "training", "state": r["status"], "title": f"Training cycle {r['run_id']}",
+                "domain": r.get("domain"), "mode": r.get("mode"), "started_at": r.get("created_at"),
+                "finished_at": r.get("finished_at"), "error": r.get("error"),
+                "loss": (r.get("result") or {}).get("train_loss"),
+            })
+        for job in (await self.store.hgetall(("factory", "jobs"))).values():
+            if job.get("status") == "running":
+                items.append({"kind": "synthesis", "state": "running", "title": f"Seed synthesis {job['id']}",
+                              "domain": job.get("domain"), "accepted": job.get("accepted"), "rejected": job.get("rejected")})
+        for rid, e in self.evaluation.running.items():
+            items.append({"kind": "evaluation", "state": "running", "title": f"Evaluation {rid}", "domain": e["domain"],
+                          "target": e["target"], "done": e["done"], "total": e["total"], "started_at": e["started_at"]})
+        queued = [j for j in await self.escalations.list(limit=500) if j.get("status") in ("queued", "running")]
+        if queued:
+            items.append({"kind": "oracle", "state": "running", "title": f"{len(queued)} escalation(s) with the oracle"})
+        pending_teacher = await self.dpo.list(status="pending_teacher", limit=500)
+        if pending_teacher:
+            items.append({"kind": "dpo", "state": "running", "title": f"{len(pending_teacher)} DPO correction(s) with the teacher"})
+        return {"ts": now, "busy": any(i["state"] == "running" for i in items), "items": items,
+                "factory_running": self.factory.running}
 
     async def _reconcile_datasets(self) -> None:
         for did in sorted({d.id for d in self.domains.all()} | set(self.datasets.domains_on_disk())):

@@ -260,7 +260,7 @@ class StudentLifecycleOrchestrator:
         await self._mark(run, Phase.PAUSED)
 
         # 3. FLUSHING -------------------------------------------------------
-        st = await self.gpu.wait_for_flush(s.student_gpu, s.vram_flush_threshold_mb, s.vram_flush_timeout_s)
+        st = await self.gpu.wait_for_flush(s.student_gpu, s.vram_flush_threshold_mb, s.vram_flush_timeout_s, s.vram_required_free_mb)
         await self._mark(run, Phase.FLUSHING, vram_used_mb=st.memory_used_mb)
 
         # 4. TRAINING -------------------------------------------------------
@@ -307,7 +307,7 @@ class StudentLifecycleOrchestrator:
         result = json.loads(result_file.read_text())
 
         # trainer has exited: VRAM must be free again before vLLM returns
-        st = await self.gpu.wait_for_flush(s.student_gpu, s.vram_flush_threshold_mb, s.vram_flush_timeout_s)
+        st = await self.gpu.wait_for_flush(s.student_gpu, s.vram_flush_threshold_mb, s.vram_flush_timeout_s, s.vram_required_free_mb)
         await self._mark(run, Phase.FLUSHING, vram_used_mb=st.memory_used_mb, after="training")
 
         # 5. RELOADING ------------------------------------------------------
@@ -354,7 +354,7 @@ class StudentLifecycleOrchestrator:
             self._write_pointer(previous)
             served = previous["lora"]["name"] if previous.get("lora") else previous.get("served_name", self.s.student_served_name)
             await self.docker.stop(self.s.trainer_container)
-            await self.gpu.wait_for_flush(self.s.student_gpu, self.s.vram_flush_threshold_mb, self.s.vram_flush_timeout_s)
+            await self.gpu.wait_for_flush(self.s.student_gpu, self.s.vram_flush_threshold_mb, self.s.vram_flush_timeout_s, self.s.vram_required_free_mb)
             await self._start_student_and_wait(served)
             await self.store.set(served, "lifecycle", "served_model")
             await self._set_phase(Phase.SERVING, rolled_back=True)
@@ -392,7 +392,7 @@ class StudentLifecycleOrchestrator:
             except asyncio.TimeoutError:
                 pass
             await self.docker.stop(self.s.student_container)
-            await self.gpu.wait_for_flush(self.s.student_gpu, self.s.vram_flush_threshold_mb, self.s.vram_flush_timeout_s)
+            await self.gpu.wait_for_flush(self.s.student_gpu, self.s.vram_flush_threshold_mb, self.s.vram_flush_timeout_s, self.s.vram_required_free_mb)
             await self._set_phase(Phase.RELOADING, model=ptr["model"])
             self._write_pointer(ptr)
             served = ptr["lora"]["name"] if ptr.get("lora") else ptr["served_name"]

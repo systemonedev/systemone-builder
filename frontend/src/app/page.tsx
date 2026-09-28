@@ -22,7 +22,7 @@ const PHASE_STATUS: Record<string, "good" | "warning" | "serious" | "critical"> 
 export default function TelemetryPage() {
   const [samples, setSamples] = useState<TelemetrySample[]>([]);
   const [losses, setLosses] = useState<Loss[]>([]);
-  const connected = useEvents(
+  useEvents(
     ["telemetry", "training"],
     (e) => {
       if (e.channel === "telemetry" && e.type === "tick") setSamples((s) => [...s.slice(-599), e.data as TelemetrySample]);
@@ -49,7 +49,6 @@ export default function TelemetryPage() {
       <PageTitle
         title="System-1 Telemetry"
         sub="Sub-100ms reflex path, prefix-cache health and training on GPU 0"
-        actions={<StatusPill status={connected ? "good" : "critical"} label={connected ? "live" : "reconnecting"} />}
       />
       <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-5">
         <Stat label="TTFT p50 (student)" value={fmtMs(last?.ttft_ms_p50)} sub={`p95 ${fmtMs(last?.ttft_ms_p95)}`} accent="var(--tier-student)" />

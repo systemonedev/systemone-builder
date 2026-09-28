@@ -4,7 +4,9 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 import { apiBase, apiKey, setApiKey } from "@/utils/api";
-import { usePoll } from "@/utils/hooks";
+import { useEvents, usePoll } from "@/utils/hooks";
+import { notify } from "@/utils/notify";
+import { ActivityBanner, LiveIndicator, Toasts, type Activity } from "@/components/Activity";
 import { ServiceList, useServices } from "@/components/Services";
 
 const NAV = [
@@ -47,6 +49,23 @@ export function Shell({ children }: { children: ReactNode }) {
   const path = usePathname();
   const health = usePoll<{ status: string; redis: boolean }>("/health", 5000);
   const services = useServices(5000);
+  const activity = usePoll<Activity>("/activity", 3000);
+  const live = useEvents(["lifecycle", "training", "eval", "factory", "workflow", "system"], (e) => {
+    const d = e.data;
+    if (e.channel === "lifecycle" && e.type === "phase") {
+      activity.reload();
+      if (d.phase === "failed") notify(`Training cycle failed: ${d.error ?? "see Factory & Training"}`, "error");
+      else if (d.phase === "serving" && d.served_model) notify(`Training finished - ${d.served_model} is now serving`, "ok");
+      else if (d.phase === "serving" && d.rolled_back) notify("Student restored to the previous weights", "info");
+    }
+    if (e.channel === "eval" && e.type === "finished")
+      notify(`Evaluation finished: accuracy ${(d.accuracy * 100).toFixed(1)}% - ${d.ready_for_deployment ? "ready" : "not ready"}`, "ok");
+    if (e.channel === "eval" && e.type === "failed") notify(`Evaluation failed: ${d.error}`, "error");
+    if (e.channel === "training" && e.type === "auto_triggered") notify(`Automatic training started for ${d.domain}`, "info");
+    if (e.channel === "workflow" && e.type === "activated") notify(`Domain ${d.domain} activated`, "ok");
+    if (["eval", "factory"].includes(e.channel)) activity.reload();
+  });
+  const authError = [services.error, activity.error].find((x) => x && /401|API-Key/i.test(x));
   const [key, setKey] = useState("");
   const [open, setOpen] = useState(false);
   useEffect(() => setKey(apiKey() ?? ""), []);
@@ -96,7 +115,20 @@ export function Shell({ children }: { children: ReactNode }) {
           <ThemeToggle />
         </div>
       </aside>
-      <main className="min-w-0 flex-1 px-4 py-5 md:px-8">{children}</main>
+      <main className="min-w-0 flex-1 px-4 py-5 md:px-8">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <LiveIndicator live={live} pollSeconds={3} />
+        </div>
+        {authError && (
+          <div className="mb-4 rounded-lg border border-line bg-surface px-4 py-2.5 text-[13px] text-ink" role="alert">
+            <span style={{ color: "var(--critical)" }}>✕</span> The API requires an API key (S1_API_KEY in .env). Enter it
+            in the sidebar field X-API-Key.
+          </div>
+        )}
+        <ActivityBanner activity={activity.data} />
+        {children}
+      </main>
+      <Toasts />
     </div>
   );
 }

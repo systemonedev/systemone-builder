@@ -54,23 +54,49 @@ class GpuMonitor(abc.ABC):
     def get(self, index: int) -> GpuStatus | None:
         return next((g for g in self.snapshot() if g.index == index), None)
 
-    async def wait_for_flush(self, index: int, threshold_mb: int, timeout_s: float, poll_s: float = 0.5) -> GpuStatus:
-        """Block until GPU ``index`` uses less than ``threshold_mb`` MiB.
+    async def wait_for_flush(
+        self,
+        index: int,
+        threshold_mb: int,
+        timeout_s: float,
+        required_free_mb: int | None = None,
+        poll_s: float = 0.5,
+        stable_s: float = 3.0,
+    ) -> GpuStatus:
+        """Block until GPU ``index`` has been released by our containers.
 
-        Raises :class:`TimeoutError` when VRAM is not released in time, which
-        the lifecycle orchestrator treats as a hard stop (never start training
-        on a card that could OOM).
+        Flushed means either:
+
+        * used VRAM is below ``threshold_mb`` (a dedicated Linux GPU), or
+        * at least ``required_free_mb`` is free and usage has stopped falling
+          for ``stable_s`` seconds. This covers GPUs that also drive a display
+          or, on WSL2, where NVML counts memory held by Windows itself
+          (desktop compositor, browsers) that never frees.
+
+        Raises :class:`TimeoutError` otherwise; the lifecycle treats that as a
+        hard stop rather than risk an OOM.
         """
         deadline = time.monotonic() + timeout_s
+        stable_since: float | None = None
+        last_used: int | None = None
         while True:
             status = self.get(index)
             if status is None:
                 raise RuntimeError(f"GPU {index} not found")
             if status.memory_used_mb < threshold_mb:
                 return status
-            if time.monotonic() >= deadline:
+            now = time.monotonic()
+            if last_used is None or abs(status.memory_used_mb - last_used) > 64:
+                stable_since = now
+            last_used = status.memory_used_mb
+            if required_free_mb is not None and status.memory_free_mb >= required_free_mb and now - (stable_since or now) >= stable_s:
+                return status
+            if now >= deadline:
+                need = f"{required_free_mb} MiB free" if required_free_mb is not None else f"< {threshold_mb} MiB used"
                 raise TimeoutError(
-                    f"GPU {index} VRAM not flushed: {status.memory_used_mb} MiB used (threshold {threshold_mb} MiB)"
+                    f"GPU {index} VRAM not released: {status.memory_used_mb} MiB used / {status.memory_free_mb} MiB free "
+                    f"(need {need}). Memory held outside systemone - another process, or on WSL2 the Windows desktop "
+                    f"and apps using this GPU - counts against it; close them or lower S1_VRAM_REQUIRED_FREE_MB."
                 )
             await asyncio.sleep(poll_s)
 

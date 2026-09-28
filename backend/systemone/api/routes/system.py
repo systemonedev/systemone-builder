@@ -28,6 +28,12 @@ async def services(rt: Runtime = Depends(get_rt)) -> dict[str, Any]:
     return await rt.services.snapshot()
 
 
+@router.get("/activity")
+async def activity(rt: Runtime = Depends(get_rt)) -> dict[str, Any]:
+    """What is running right now (training, synthesis, evaluation, queues)."""
+    return await rt.activity()
+
+
 @router.get("/hardware")
 async def hardware(rt: Runtime = Depends(get_rt)) -> dict[str, Any]:
     snap = await rt.hardware.snapshot()
