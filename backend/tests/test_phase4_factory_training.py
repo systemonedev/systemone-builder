@@ -57,3 +57,20 @@ async def test_prepare_run_writes_container_paths(redis_client, tmp_path):
     assert lc.acquire() and lc.inflight == 1
     lc.release()
     assert lc.inflight == 0
+
+
+async def test_reconcile_rebuilds_index_after_files_vanish(redis_client, tmp_path):
+    # Redis still counts samples whose files are gone (e.g. workspace moved to a new volume)
+    store = JsonStore(redis_client, "t")
+    old = DatasetStore(tmp_path / "old", store)
+    for i in range(3):
+        await old.add_sft(SFTSample(domain="secops", state={**STATE, "n": i}, action=ACTION, source="oracle"))
+    await old.mark_trained("secops", 3)
+    new = DatasetStore(tmp_path / "new", store)
+    assert (await new.stats("secops"))["sft"] == 3            # stale
+    assert not await new.add_sft(SFTSample(domain="secops", state={**STATE, "n": 0}, action=ACTION, source="oracle"))
+    rep = await new.reconcile("secops")
+    assert rep["sft"] == {"before": 3, "after": 0}
+    assert (await new.stats("secops"))["sft"] == 0 and (await new.stats("secops"))["trained_upto"] == 0
+    assert await new.add_sft(SFTSample(domain="secops", state={**STATE, "n": 0}, action=ACTION, source="oracle"))
+    assert new.export_sft(SECOPS, tmp_path / "train.jsonl") == 1
