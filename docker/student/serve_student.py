@@ -54,6 +54,40 @@ def supported_flags() -> set[str] | None:
     return None
 
 
+def pin_gpu(tag: str) -> None:
+    """Pin this process to GPU ``S1_GPU_INDEX`` when isolation is not enforced.
+
+    Compose (``device_ids``) and the orchestrator (``DeviceRequest``) expose a
+    single GPU per container on native Linux, where index 0 inside the
+    container is the right one. Docker Desktop / WSL2 exposes every GPU to every
+    container regardless, so CUDA would default to GPU 0 for all of them and
+    the triage server would land on the student's GPU. In that case pin
+    explicitly. PCI bus order makes CUDA's numbering match NVML's.
+    """
+    os.environ.setdefault("CUDA_DEVICE_ORDER", "PCI_BUS_ID")
+    want = os.environ.get("S1_GPU_INDEX")
+    if want is None or os.environ.get("CUDA_VISIBLE_DEVICES"):
+        return
+    try:
+        out = subprocess.run(["nvidia-smi", "-L"], capture_output=True, text=True, timeout=30).stdout
+        visible = [ln for ln in out.splitlines() if ln.startswith("GPU ")]
+    except (OSError, subprocess.TimeoutExpired):
+        visible = []
+    if not visible:  # no nvidia-smi in the image: ask NVML directly
+        try:
+            import pynvml
+
+            pynvml.nvmlInit()
+            visible = [str(i) for i in range(pynvml.nvmlDeviceGetCount())]
+            pynvml.nvmlShutdown()
+        except Exception:
+            visible = []
+    if len(visible) > 1:
+        os.environ["CUDA_VISIBLE_DEVICES"] = want
+        print(f"[{tag}] {len(visible)} GPUs visible (container GPU isolation not enforced, e.g. WSL2): "
+              f"pinning to GPU {want} via CUDA_VISIBLE_DEVICES", flush=True)
+
+
 def in_wsl() -> bool:
     # Same test vLLM uses (vllm/platforms/interface.py); inside a container the
     # kernel string is the host's, so this also detects Docker Desktop / WSL2.
@@ -165,6 +199,7 @@ def probe_offload_gb(requested: int) -> int:
 
 
 def main() -> None:
+    pin_gpu(f"serve_{ROLE}")
     warn_slow_storage()
     if os.environ.get("S1_CLEAN_SHM", "1") != "0":
         clean_stale_offload_files()

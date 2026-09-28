@@ -125,6 +125,11 @@ export function Shell({ children }: { children: ReactNode }) {
             in the sidebar field X-API-Key.
           </div>
         )}
+        {(services.data?.warnings ?? []).map((w) => (
+          <div key={w} className="mb-4 rounded-lg border border-line bg-surface px-4 py-2.5 text-[13px] text-ink" role="alert">
+            <span style={{ color: "var(--warning)" }}>▲</span> {w}
+          </div>
+        ))}
         <ActivityBanner activity={activity.data} />
         {children}
       </main>

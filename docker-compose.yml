@@ -107,6 +107,8 @@ services:
     env_file: [{ path: .env, required: false }]
     environment:
       S1_STUDENT_BASE_MODEL: ${S1_STUDENT_BASE_MODEL:-Qwen/Qwen2.5-1.5B-Instruct}
+      S1_GPU_INDEX: ${S1_STUDENT_GPU:-0}   # pinned if the runtime exposes every GPU (WSL2)
+      CUDA_DEVICE_ORDER: PCI_BUS_ID
       S1_KV_OFFLOAD_GB: ${S1_KV_OFFLOAD_GB:-32}
       HF_HOME: /workspace/hf_cache
       VLLM_CACHE_ROOT: /workspace/vllm_cache
@@ -139,6 +141,8 @@ services:
     env_file: [{ path: .env, required: false }]
     environment:
       S1_VLLM_ROLE: triage
+      S1_GPU_INDEX: ${S1_TRIAGE_GPU:-1}    # pinned if the runtime exposes every GPU (WSL2)
+      CUDA_DEVICE_ORDER: PCI_BUS_ID
       S1_TRIAGE_MODEL: ${S1_TRIAGE_MODEL:-Qwen/Qwen2.5-14B-Instruct-AWQ}
       S1_GPU_MEMORY_UTILIZATION: ${S1_TRIAGE_GPU_MEMORY_UTILIZATION:-0.90}
       S1_MAX_MODEL_LEN: ${S1_TRIAGE_MAX_MODEL_LEN:-16384}

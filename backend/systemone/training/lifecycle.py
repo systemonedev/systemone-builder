@@ -158,6 +158,21 @@ class StudentLifecycleOrchestrator:
             "busy": self.busy,
         }
 
+    async def _flush(self, stage: str) -> Any:
+        """wait_for_flush with a diagnosis of who holds GPU 0 on failure."""
+        s = self.s
+        try:
+            return await self.gpu.wait_for_flush(s.student_gpu, s.vram_flush_threshold_mb, s.vram_flush_timeout_s,
+                                                 s.vram_required_free_mb)
+        except TimeoutError as exc:
+            from systemone.orchestrator.gpu import placement_warnings
+
+            gpus = self.gpu.snapshot()
+            usage = ", ".join(f"GPU {g.index}: {g.memory_used_mb}/{g.memory_total_mb} MiB" for g in gpus)
+            triage = await self.docker.status(s.triage_container)
+            hints = placement_warnings(gpus, {"triage": s.triage_gpu}, {"triage"} if triage.status == "running" else set())
+            raise LifecycleError(f"{stage}: {exc} [{usage}] {' '.join(hints)}".strip()) from exc
+
     # ------------------------------------------------------------ runs
     async def _save_run(self, run: dict[str, Any]) -> None:
         await self.store.hset(("training", "runs"), run["run_id"], run)
@@ -260,7 +275,7 @@ class StudentLifecycleOrchestrator:
         await self._mark(run, Phase.PAUSED)
 
         # 3. FLUSHING -------------------------------------------------------
-        st = await self.gpu.wait_for_flush(s.student_gpu, s.vram_flush_threshold_mb, s.vram_flush_timeout_s, s.vram_required_free_mb)
+        st = await self._flush("before training")
         await self._mark(run, Phase.FLUSHING, vram_used_mb=st.memory_used_mb)
 
         # 4. TRAINING -------------------------------------------------------
@@ -295,6 +310,7 @@ class StudentLifecycleOrchestrator:
             command=[f"{cfg['output_dir']}/config.json"],
             gpu=s.student_gpu,
             environment={"PYTHONUNBUFFERED": "1", "HF_HOME": f"{s.workspace_container_path}/hf_cache",
+                         "S1_GPU_INDEX": str(s.student_gpu), "CUDA_DEVICE_ORDER": "PCI_BUS_ID",
                          **({"HF_TOKEN": _env("HF_TOKEN")} if _env("HF_TOKEN") else {})},
             volumes={s.workspace_host_path: {"bind": s.workspace_container_path, "mode": "rw"}},
         )
@@ -307,7 +323,7 @@ class StudentLifecycleOrchestrator:
         result = json.loads(result_file.read_text())
 
         # trainer has exited: VRAM must be free again before vLLM returns
-        st = await self.gpu.wait_for_flush(s.student_gpu, s.vram_flush_threshold_mb, s.vram_flush_timeout_s, s.vram_required_free_mb)
+        st = await self._flush("after training")
         await self._mark(run, Phase.FLUSHING, vram_used_mb=st.memory_used_mb, after="training")
 
         # 5. RELOADING ------------------------------------------------------
@@ -354,7 +370,13 @@ class StudentLifecycleOrchestrator:
             self._write_pointer(previous)
             served = previous["lora"]["name"] if previous.get("lora") else previous.get("served_name", self.s.student_served_name)
             await self.docker.stop(self.s.trainer_container)
-            await self.gpu.wait_for_flush(self.s.student_gpu, self.s.vram_flush_threshold_mb, self.s.vram_flush_timeout_s, self.s.vram_required_free_mb)
+            try:
+                await self.gpu.wait_for_flush(self.s.student_gpu, self.s.vram_flush_threshold_mb,
+                                              self.s.vram_flush_timeout_s, self.s.vram_required_free_mb)
+            except TimeoutError as exc:
+                # Never leave the stack without a student: try anyway, vLLM
+                # reports precisely what it could not allocate.
+                log.warning("rollback: %s - starting the student anyway", exc)
             await self._start_student_and_wait(served)
             await self.store.set(served, "lifecycle", "served_model")
             await self._set_phase(Phase.SERVING, rolled_back=True)
@@ -392,7 +414,7 @@ class StudentLifecycleOrchestrator:
             except asyncio.TimeoutError:
                 pass
             await self.docker.stop(self.s.student_container)
-            await self.gpu.wait_for_flush(self.s.student_gpu, self.s.vram_flush_threshold_mb, self.s.vram_flush_timeout_s, self.s.vram_required_free_mb)
+            await self._flush("rollback")
             await self._set_phase(Phase.RELOADING, model=ptr["model"])
             self._write_pointer(ptr)
             served = ptr["lora"]["name"] if ptr.get("lora") else ptr["served_name"]

@@ -161,3 +161,25 @@ class NvmlGpuMonitor(GpuMonitor):
 
 def create_gpu_monitor(roles: dict[int, str]) -> GpuMonitor:
     return NvmlGpuMonitor(roles)
+
+
+def placement_warnings(gpus: list[GpuStatus], expected: dict[str, int], running: set[str], min_used_mb: int = 3000) -> list[str]:
+    """Services that are up while their assigned GPU is nearly idle.
+
+    A vLLM server claims most of its GPU's memory, so an up service whose GPU
+    shows almost nothing used is running somewhere else - typically because
+    the container runtime exposed every GPU (WSL2) and CUDA picked GPU 0.
+    """
+    by_index = {g.index: g for g in gpus}
+    out = []
+    for name, idx in expected.items():
+        g = by_index.get(idx)
+        if name in running and g is not None and g.memory_used_mb < min_used_mb:
+            others = ", ".join(f"GPU {o.index}: {o.memory_used_mb} MiB" for o in gpus if o.index != idx)
+            out.append(
+                f"{name} is running but its GPU {idx} shows only {g.memory_used_mb} MiB used ({others}); "
+                f"it is probably on another GPU. Rebuild the launcher image and recreate the container "
+                f"so it pins itself (S1_GPU_INDEX)."
+            )
+    return out
+

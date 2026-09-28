@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
@@ -13,6 +14,8 @@ from systemone.api.deps import get_rt, ws_authorized
 from systemone.domains.spec import DomainSpec
 from systemone.runtime import Runtime
 from systemone.workflow.engine import generate_safe
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(tags=["dashboard"])
 ws_router = APIRouter()
@@ -25,10 +28,13 @@ async def events(ws: WebSocket) -> None:
     On connect the server sends ``{"type": "hello", "history": ...}`` with
     the recent telemetry samples and events, then streams every bus event.
     """
-    if not ws_authorized(ws):
-        await ws.close(code=4401)
-        return
+    # Accept before rejecting: a close before accept becomes an HTTP 403 in the
+    # handshake, which browsers only surface as a generic code 1006.
     await ws.accept()
+    if not ws_authorized(ws):
+        log.info("websocket rejected: missing or wrong API key")
+        await ws.close(code=4401, reason="missing or wrong API key")
+        return
     rt: Runtime = ws.app.state.rt
     channels = set(filter(None, (ws.query_params.get("channels") or "").split(",")))
     q = rt.bus.subscribe()

@@ -20,6 +20,7 @@ import time
 from typing import Any
 
 from systemone.orchestrator.docker_ctl import ContainerController
+from systemone.orchestrator.gpu import placement_warnings
 
 # Most specific first. Each maps a vLLM / HF log line to a short progress label.
 _PROGRESS = [
@@ -138,7 +139,12 @@ class ServiceMonitor:
         )
         api = {"name": "api", "state": "online", "detail": "operational"}
         services = [api, redis, student, triage, oracle]
-        snap = {"ts": time.time(), "services": services,
-                "operational": all(x["state"] == "online" for x in services)}
+        up = {x["name"] for x in (student, triage) if x["state"] == "online"}
+        try:
+            warnings = placement_warnings(self.rt.gpu.snapshot(), {"student": s.student_gpu, "triage": s.triage_gpu}, up)
+        except Exception:
+            warnings = []
+        snap = {"ts": time.time(), "services": services, "warnings": warnings,
+                "operational": all(x["state"] == "online" for x in services) and not warnings}
         self._cache = (time.monotonic(), snap)
         return snap

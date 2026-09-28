@@ -16,7 +16,7 @@ export type Service = {
   url?: string;
   lifecycle_phase?: string;
 };
-export type ServicesSnapshot = { ts: number; operational: boolean; services: Service[] };
+export type ServicesSnapshot = { ts: number; operational: boolean; services: Service[]; warnings?: string[] };
 
 const STATE: Record<string, { status: "good" | "warning" | "serious" | "critical" | "neutral"; label: string }> = {
   online: { status: "good", label: "online" },

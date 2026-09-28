@@ -69,6 +69,25 @@ def cmd_doctor(_: argparse.Namespace) -> int:
 
         gpus = NvmlGpuMonitor().snapshot()
         check("NVML", True, f"{len(gpus)} GPU(s): " + ", ".join(f"{g.name} {g.memory_total_mb // 1024}GB" for g in gpus))
+        for g in gpus:
+            print(f"         GPU {g.index}: {g.memory_used_mb}/{g.memory_total_mb} MiB used, {g.utilization_pct}% util")
+        try:
+            import docker as _docker
+
+            from systemone.orchestrator.gpu import placement_warnings
+
+            dc = _docker.from_env()
+            up = set()
+            for role, name in (("student", s.student_container), ("triage", s.triage_container)):
+                try:
+                    if dc.containers.get(name).status == "running":
+                        up.add(role)
+                except Exception:
+                    pass
+            for w in placement_warnings(gpus, {"student": s.student_gpu, "triage": s.triage_gpu}, up):
+                check("GPU placement", False, w)
+        except Exception:
+            pass
         check("student GPU present", any(g.index == s.student_gpu for g in gpus), f"GPU {s.student_gpu}")
         check("triage GPU present", any(g.index == s.triage_gpu for g in gpus), f"GPU {s.triage_gpu}")
     except Exception as exc:

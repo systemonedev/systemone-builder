@@ -1,16 +1,25 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, wsUrl } from "./api";
+import { api, apiBase, wsUrl } from "./api";
 
 export type BusEvent = { channel: string; type: string; ts: number; data: Record<string, any> };
 export type TelemetrySample = Record<string, any> & { ts: number };
 
 export type LiveStatus = { connected: boolean; reason: string | null };
 
-function closeReason(code: number): string {
+async function closeReason(code: number): Promise<string> {
   if (code === 4401) return "API key missing or wrong - enter it in the sidebar";
-  if (code === 1006) return "cannot reach the API on port 8000";
+  if (code === 1006) {
+    // Browsers report every failed handshake as 1006; find out which it is.
+    try {
+      const r = await fetch(`${apiBase()}/api/v1/health`, { cache: "no-store" });
+      if (r.ok) return "the API answers HTTP but refused the WebSocket - check `docker compose logs api` for 'WebSocket /api/v1/ws'";
+    } catch {
+      /* fall through */
+    }
+    return `cannot reach the API at ${apiBase()}`;
+  }
   return `connection closed (code ${code})`;
 }
 
@@ -30,7 +39,7 @@ export function useEvents(channels: string[], onEvent: (e: BusEvent) => void, on
       ws = new WebSocket(wsUrl(key ? key.split(",") : undefined));
       ws.onopen = () => setStatus({ connected: true, reason: null });
       ws.onclose = (ev) => {
-        setStatus({ connected: false, reason: closeReason(ev.code) });
+        closeReason(ev.code).then((reason) => setStatus({ connected: false, reason }));
         if (!closed) retry = setTimeout(connect, 1500);
       };
       ws.onmessage = (m) => {
