@@ -42,6 +42,10 @@ class Settings(BaseSettings):
     # VRAM (MiB) below which GPU 0 is considered flushed.
     vram_flush_threshold_mb: int = 1024
     vram_flush_timeout_s: float = 120.0
+    # Alternative flush criterion when the GPU is shared with a display or,
+    # on WSL2, with Windows: enough free VRAM for the trainer and for vLLM's
+    # --gpu-memory-utilization (0.85 x 24 GB = 20.9 GB).
+    vram_required_free_mb: int = 21000
     # How long a (re)started vLLM student may take to load weights and pass
     # its health check before the lifecycle rolls back.
     student_start_timeout_s: float = 1800.0

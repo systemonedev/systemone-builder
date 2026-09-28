@@ -85,6 +85,8 @@ class EvaluationSandbox:
         self.student_model_name = student_model_name
         self.max_tokens = max_tokens
         self._tasks: dict[str, asyncio.Task[Any]] = {}
+        # report_id -> {"domain", "target", "done", "total", "started_at"} while running
+        self.running: dict[str, dict[str, Any]] = {}
 
     # --------------------------------------------------------------- jobs
     def launch(self, req: EvalRequest) -> str:
@@ -97,6 +99,7 @@ class EvaluationSandbox:
                 report = await self.run(req, report_id)
                 await self.store.hset(("eval", "reports"), report_id, _summary(report))
             except Exception as exc:
+                self.running.pop(report_id, None)
                 log.exception("evaluation %s failed", report_id)
                 await self.store.hset(("eval", "reports"), report_id, {"id": report_id, "status": "failed", "error": repr(exc),
                                                                        "domain": req.domain, "target": req.target})
@@ -130,6 +133,8 @@ class EvaluationSandbox:
         model = req.model or (await self.student_model_name() if req.target == "student" else None)
         pb = PromptBuilder(domain)
         self.bus.publish("eval", "started", id=report_id, domain=domain.id, target=req.target, n=len(samples))
+        self.running[report_id] = {"domain": domain.id, "target": req.target, "done": 0, "total": len(samples),
+                                   "started_at": time.time()}
 
         # Warm the prefix cache / CUDA graphs so latency reflects steady state.
         for s in samples[: req.warmup]:
@@ -141,6 +146,7 @@ class EvaluationSandbox:
         rows: list[dict[str, Any]] = []
         for i, s in enumerate(samples):
             rows.append(await self._evaluate_one(adapter, domain, pb, s, model))
+            self.running[report_id]["done"] = i + 1
             if (i + 1) % 10 == 0 or i + 1 == len(samples):
                 self.bus.publish("eval", "progress", id=report_id, done=i + 1, total=len(samples))
 
@@ -153,6 +159,7 @@ class EvaluationSandbox:
         out = self.results_dir / domain.id / f"{report_id}.json"
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(json.dumps(report, indent=2))
+        self.running.pop(report_id, None)
         self.bus.publish("eval", "finished", **_summary(report))
         return report
 

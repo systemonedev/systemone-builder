@@ -75,7 +75,7 @@ export default function RoutingPage() {
   const [feed, setFeed] = useState<BusEvent[]>([]);
   const [counts, setCounts] = useState<Record<string, number>>({});
 
-  const connected = useEvents(["routing"], (e) => {
+  useEvents(["routing"], (e) => {
     if (e.type !== "decision") return;
     const path: string[] = (e.data.route ?? []).map((r: any) => r.tier);
     if (e.data.halted) path.push("oracle");
@@ -95,7 +95,6 @@ export default function RoutingPage() {
       <PageTitle
         title="Fast-Slow Routing"
         sub="Dynamic confidence routing: Student → Triage → Oracle"
-        actions={<StatusPill status={connected ? "good" : "critical"} label={connected ? "live" : "reconnecting"} />}
       />
       <div className="grid gap-4 xl:grid-cols-[1fr_380px]">
         <Card title="Live routing map" actions={<span className="text-xs text-ink-3">edge labels = decisions this session</span>}>

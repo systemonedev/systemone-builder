@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { BarChart } from "@/components/BarChart";
 import { Button, Card, Empty, ErrorNote, Field, inputCls, PageTitle, Stat, StatusPill } from "@/components/ui";
 import { api } from "@/utils/api";
+import { notify } from "@/utils/notify";
 import { fmtMs, fmtPct, fmtTime } from "@/utils/format";
 import { useEvents, usePoll } from "@/utils/hooks";
 
@@ -37,12 +38,14 @@ export default function EvalPage() {
     api<any>(`/eval/reports/${selId}`).then(setRep).catch((e) => setErr(e.message));
   }, [selId]);
 
-  const call = async (fn: () => Promise<any>) => {
+  const call = async (fn: () => Promise<any>, ok?: string | ((r: any) => string)) => {
     try {
       setErr(null);
-      await fn();
+      const r = await fn();
+      if (ok) notify(typeof ok === "function" ? ok(r) : ok, "ok");
     } catch (e: any) {
       setErr(e.message);
+      notify(e.message, "error");
     }
   };
 
@@ -95,7 +98,12 @@ export default function EvalPage() {
           <div className="mt-3 flex items-center gap-3">
             <Button
               variant="primary"
-              onClick={() => call(() => api("/eval/run", { method: "POST", json: { domain, target, limit, gates, apply_calibration: applyCal } }))}
+              onClick={() =>
+                call(
+                  () => api("/eval/run", { method: "POST", json: { domain, target, limit, gates, apply_calibration: applyCal } }),
+                  (r) => `Evaluation ${r.report_id} started - progress is shown at the top of the page`,
+                )
+              }
             >
               Run evaluation
             </Button>

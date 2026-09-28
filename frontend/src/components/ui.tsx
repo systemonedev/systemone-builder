@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 
 export function Card({ title, actions, children, className = "" }: { title?: ReactNode; actions?: ReactNode; children: ReactNode; className?: string }) {
   return (
@@ -59,19 +59,32 @@ export function TierBadge({ tier }: { tier: string }) {
   );
 }
 
+/** Button. If onClick returns a promise the button shows a working state
+ *  and ignores further clicks until it settles. */
 export function Button({
   children,
   onClick,
   variant = "default",
   disabled,
   type = "button",
+  title,
 }: {
   children: ReactNode;
-  onClick?: () => void;
+  onClick?: () => void | Promise<unknown>;
   variant?: "default" | "primary" | "danger" | "ghost";
   disabled?: boolean;
   type?: "button" | "submit";
+  title?: string;
 }) {
+  const [pending, setPending] = useState(false);
+  const handle = () => {
+    if (!onClick || pending) return;
+    const r = onClick();
+    if (r && typeof (r as Promise<unknown>).finally === "function") {
+      setPending(true);
+      (r as Promise<unknown>).finally(() => setPending(false));
+    }
+  };
   const styles = {
     default: "border border-line bg-surface-2 text-ink hover:border-ink-3",
     primary: "bg-accent text-white hover:opacity-90",
@@ -81,10 +94,13 @@ export function Button({
   return (
     <button
       type={type}
-      onClick={onClick}
-      disabled={disabled}
-      className={`rounded-md px-3 py-1.5 text-[13px] font-medium transition disabled:cursor-not-allowed disabled:opacity-40 ${styles}`}
+      onClick={handle}
+      disabled={disabled || pending}
+      title={title}
+      aria-busy={pending}
+      className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[13px] font-medium transition disabled:cursor-not-allowed disabled:opacity-40 ${styles}`}
     >
+      {pending && <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" aria-hidden />}
       {children}
     </button>
   );

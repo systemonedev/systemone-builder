@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Button, Card, ErrorNote, Field, inputCls, Json, PageTitle, StatusPill } from "@/components/ui";
 import { api } from "@/utils/api";
+import { notify } from "@/utils/notify";
 import { fmtMb, fmtTime } from "@/utils/format";
 import { useEvents, usePoll } from "@/utils/hooks";
 
@@ -58,19 +59,23 @@ export default function TrainingPage() {
     if (e.channel === "lifecycle") status.reload();
   });
 
-  const call = async (fn: () => Promise<any>) => {
+  const call = async (fn: () => Promise<any>, ok?: string | ((r: any) => string)) => {
     try {
       setErr(null);
-      await fn();
+      const r = await fn();
+      if (ok) notify(typeof ok === "function" ? ok(r) : ok, "ok");
       status.reload();
       runs.reload();
       factory.reload();
     } catch (e: any) {
       setErr(e.message);
+      notify(e.message, "error");
     }
   };
 
   const s = status.data;
+  // busy while a cycle holds the lock or GPU 0 is anywhere between serving states
+  const cycleActive = !!s && (s.busy || !["serving", "failed", undefined].includes(s.phase));
   return (
     <div>
       <PageTitle title="Synthetic Factory & Training" sub="Strict GPU 0 lifecycle: pause vLLM → flush VRAM → Unsloth QLoRA → hot-reload" />
@@ -110,10 +115,20 @@ export default function TrainingPage() {
                 <option value="dpo">DPO (preferences)</option>
               </select>
             </Field>
-            <Button variant="primary" disabled={s?.busy} onClick={() => call(() => api("/training/run", { method: "POST", json: { domain, mode } }))}>
-              Run training cycle
+            <Button
+              variant="primary"
+              disabled={cycleActive}
+              title={cycleActive ? "A training cycle is already running - follow it in the banner above" : undefined}
+              onClick={() =>
+                call(
+                  () => api("/training/run", { method: "POST", json: { domain, mode } }),
+                  (r) => `Training cycle ${r.run_id} started on ${r.rows} samples - progress is shown at the top of the page`,
+                )
+              }
+            >
+              {cycleActive ? "Training in progress…" : "Run training cycle"}
             </Button>
-            {s?.phase === "failed" && <Button onClick={() => call(() => api("/training/recover", { method: "POST" }))}>Recover student</Button>}
+            {s?.phase === "failed" && <Button onClick={() => call(() => api("/training/recover", { method: "POST" }), "Student restarted")}>Recover student</Button>}
           </div>
         </Card>
 
@@ -150,7 +165,7 @@ export default function TrainingPage() {
                   </td>
                   <td className="text-right">
                     {r.status === "succeeded" && (
-                      <Button variant="ghost" disabled={s?.busy} onClick={() => call(() => api("/training/rollback", { method: "POST", json: { run_id: r.run_id } }))}>
+                      <Button variant="ghost" disabled={cycleActive} onClick={() => call(() => api("/training/rollback", { method: "POST", json: { run_id: r.run_id } }), `Now serving ${r.run_id}`)}>
                         serve
                       </Button>
                     )}
@@ -161,7 +176,7 @@ export default function TrainingPage() {
           </table>
           {!runs.data?.length && <div className="py-4 text-center text-xs text-ink-3">No runs yet</div>}
           <div className="mt-2">
-            <Button variant="ghost" disabled={s?.busy} onClick={() => call(() => api("/training/rollback", { method: "POST", json: { run_id: null } }))}>
+            <Button variant="ghost" disabled={cycleActive} onClick={() => call(() => api("/training/rollback", { method: "POST", json: { run_id: null } }), "Now serving the base model")}>
               Roll back to base model
             </Button>
           </div>
@@ -173,9 +188,9 @@ export default function TrainingPage() {
           title="Synthetic factory (Mac oracle)"
           actions={
             factory.data?.running ? (
-              <Button onClick={() => call(() => api("/factory/stop", { method: "POST" }))}>Stop replay distillation</Button>
+              <Button onClick={() => call(() => api("/factory/stop", { method: "POST" }), "Replay distillation stopped")}>Stop replay distillation</Button>
             ) : (
-              <Button variant="primary" onClick={() => call(() => api("/factory/start", { method: "POST" }))}>Start replay distillation</Button>
+              <Button variant="primary" onClick={() => call(() => api("/factory/start", { method: "POST" }), "Replay distillation started")}>Start replay distillation</Button>
             )
           }
         >
@@ -227,6 +242,7 @@ export default function TrainingPage() {
                       method: "POST",
                       json: { domain, per_scenario: per, scenarios: scenarios.trim() ? scenarios.split("\n").map((x) => x.trim()).filter(Boolean) : null },
                     }),
+                    (r) => `Seed synthesis ${r.job_id} started on the Mac oracle`,
                   )
                 }
               >
