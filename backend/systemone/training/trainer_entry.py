@@ -32,6 +32,23 @@ from pathlib import Path
 ALL_LINEAR = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
 
 
+PINNED_PACKAGES = ["unsloth", "unsloth_zoo", "trl", "datasets", "peft", "transformers", "bitsandbytes",
+                   "accelerate", "torch"]
+
+
+def environment_versions() -> dict:
+    """Exact versions this run used - copy them into docker/trainer/requirements.txt."""
+    from importlib.metadata import PackageNotFoundError, version
+
+    out = {}
+    for name in PINNED_PACKAGES:
+        try:
+            out[name] = version(name)
+        except PackageNotFoundError:
+            out[name] = None
+    return out
+
+
 def emit(kind: str, **data) -> None:
     print("S1_METRIC " + json.dumps({"kind": kind, "ts": time.time(), **data}), flush=True)
 
@@ -166,6 +183,7 @@ def main(config_path: str) -> int:
     model.save_pretrained(str(adapter_dir))
     tokenizer.save_pretrained(str(adapter_dir))
     result = {
+        "environment": environment_versions(),
         "run_id": cfg["run_id"],
         "mode": cfg["mode"],
         "train_loss": float(stats.training_loss),

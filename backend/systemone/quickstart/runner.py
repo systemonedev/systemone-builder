@@ -130,7 +130,9 @@ def run(api: str, api_key: str | None = None, n_train: int = 600, n_heldout: int
         say(f"accuracy {m['accuracy']:.1%} · success {m['success_rate'] or 0:.1%} · hallucination {m['hallucination_ratio']:.1%} · "
             f"p95 latency {rep['latency_ms'].get('p95') or 0:.0f} ms · ready={rep['readiness']['ready_for_deployment']}")
     host = os.environ.get("S1_PUBLIC_HOST", "localhost")
-    say(f"done. Dashboard: http://{host}:3000  ·  Playground: http://{host}:3000/playground  ·  API docs: http://{host}:8000/docs")
+    dash = os.environ.get("S1_PUBLIC_DASHBOARD_PORT", "3090")
+    api_port = os.environ.get("S1_PUBLIC_API_PORT", "8090")
+    say(f"done. Dashboard: http://{host}:{dash}  ·  Playground: http://{host}:{dash}/playground  ·  API docs: http://{host}:{api_port}/docs")
     return 0
 
 

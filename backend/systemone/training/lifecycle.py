@@ -311,9 +311,16 @@ class StudentLifecycleOrchestrator:
             gpu=s.student_gpu,
             environment={"PYTHONUNBUFFERED": "1", "HF_HOME": f"{s.workspace_container_path}/hf_cache",
                          "S1_GPU_INDEX": str(s.student_gpu), "CUDA_DEVICE_ORDER": "PCI_BUS_ID",
+                         "NVIDIA_VISIBLE_DEVICES": str(s.student_gpu),
                          **({"HF_TOKEN": _env("HF_TOKEN")} if _env("HF_TOKEN") else {})},
             volumes={s.workspace_host_path: {"bind": s.workspace_container_path, "mode": "rw"}},
+            shm_size=s.trainer_shm_size,
+            mem_limit=s.trainer_mem_limit,
         )
+        # Hard guard: never put the trainer on GPU 0 next to a live student.
+        student = await self.docker.status(s.student_container)
+        if student.status in ("running", "restarting"):
+            raise LifecycleError(f"refusing to start the trainer: {s.student_container} is {student.status}")
         code = await self.docker.run_to_completion(spec, on_log=on_log, timeout_s=6 * 3600)
         await asyncio.sleep(0.1)  # let queued log callbacks run
         await asyncio.gather(*pending, return_exceptions=True)
@@ -346,6 +353,9 @@ class StudentLifecycleOrchestrator:
 
     async def _start_student_and_wait(self, served: str, timeout_s: float | None = None) -> None:
         timeout_s = timeout_s or self.s.student_start_timeout_s
+        trainer = await self.docker.status(self.s.trainer_container)
+        if trainer.status in ("running", "restarting"):
+            raise LifecycleError(f"refusing to start the student: {self.s.trainer_container} is still {trainer.status}")
         await self.docker.start(self.s.student_container)
         root = self.s.student_url[:-3] if self.s.student_url.endswith("/v1") else self.s.student_url
         deadline = time.monotonic() + timeout_s

@@ -41,7 +41,11 @@ class RunSpec:
     gpu: int
     environment: dict[str, str] = field(default_factory=dict)
     volumes: dict[str, dict[str, str]] = field(default_factory=dict)
-    shm_size: str = "16g"
+    # Private /dev/shm for dataloader workers. Not ipc=host: sharing the host's
+    # IPC namespace lets a container pin unbounded shared memory, which on
+    # WSL2 can exhaust the whole VM.
+    shm_size: str = "8g"
+    mem_limit: str | None = None
     network: str | None = None
 
 
@@ -147,8 +151,8 @@ class DockerController(ContainerController):
             volumes=spec.volumes,
             device_requests=[device],
             shm_size=spec.shm_size,
+            mem_limit=spec.mem_limit,
             network=spec.network,
-            ipc_mode="host",
         )
 
         def _stream() -> None:

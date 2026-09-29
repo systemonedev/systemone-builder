@@ -65,7 +65,7 @@ It then runs the one-shot **quickstart** service, which:
 2. runs the first strict **pause vLLM → flush VRAM → Unsloth QLoRA → hot-reload** cycle on GPU 0,
 3. benchmarks the fine-tuned student and prints accuracy, hallucination ratio and latency.
 
-Open **http://&lt;linux-host&gt;:3000** for the dashboard. Interactive API docs are at `:8000/docs`.
+Open **http://&lt;linux-host&gt;:3090** for the dashboard. Interactive API docs are at `:8090/docs`.
 `systemone doctor` (inside the `api` container or a local install) checks GPUs, Docker,
 Redis and all three model endpoints.
 
@@ -88,16 +88,16 @@ Backend code lives under `backend/systemone/`.
 
 ```bash
 # route an observation (the reflex path)
-curl -s localhost:8000/api/v1/act/secops -H 'content-type: application/json' -d '{
+curl -s localhost:8090/api/v1/act/secops -H 'content-type: application/json' -d '{
   "observation": {"kind": "json", "data": {"source": "suricata_eve", "src_ip": "192.168.1.150",
                   "payload_snippet": "GET /../../../../etc/passwd HTTP/1.1\r\n\r\n"}}}'
 
 # report what happened (feeds the state-delta DPO loop)
-curl -s localhost:8000/api/v1/feedback -H 'content-type: application/json' \
+curl -s localhost:8090/api/v1/feedback -H 'content-type: application/json' \
   -d '{"seq": 42, "outcome": "failure", "post_observation": {...}}'
 
 # create a new specialization from a prompt
-curl -s localhost:8000/api/v1/workflows/generate -H 'content-type: application/json' \
+curl -s localhost:8090/api/v1/workflows/generate -H 'content-type: application/json' \
   -d '{"prompt": "Block SSH brute-forcers on our bastions, never block 10.20.0.0/16"}'
 ```
 
@@ -121,7 +121,7 @@ python -m venv .venv && . .venv/bin/activate
 pip install -e "backend[dev]"
 redis-server --daemonize yes
 S1_TEST_REDIS_URL=redis://localhost:6379/15 pytest backend/tests
-cd frontend && npm ci && npm run dev      # dashboard on :3000 against an API on :8000
+cd frontend && NEXT_PUBLIC_S1_API_PORT=8000 npm run dev   # dashboard on :3000 against `systemone serve` on :8000
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). Licensed under Apache-2.0.

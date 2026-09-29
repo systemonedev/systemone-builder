@@ -198,8 +198,28 @@ def probe_offload_gb(requested: int) -> int:
     return 0
 
 
+def log_memory_budget() -> None:
+    """Print the memory this container may use, so logs show each engine's budget."""
+    limit = None
+    for path in ("/sys/fs/cgroup/memory.max", "/sys/fs/cgroup/memory/memory.limit_in_bytes"):
+        try:
+            raw = open(path).read().strip()
+            if raw != "max" and int(raw) < 1 << 60:
+                limit = int(raw)
+            break
+        except (OSError, ValueError):
+            continue
+    try:
+        total = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
+    except (ValueError, OSError):
+        total = None
+    gb = lambda b: f"{b / 1024**3:.0f} GB" if b else "unknown"  # noqa: E731
+    print(f"[serve_{ROLE}] memory: container limit {gb(limit) if limit else 'none'}, host/VM total {gb(total)}", flush=True)
+
+
 def main() -> None:
     pin_gpu(f"serve_{ROLE}")
+    log_memory_budget()
     warn_slow_storage()
     if os.environ.get("S1_CLEAN_SHM", "1") != "0":
         clean_stale_offload_files()
@@ -236,7 +256,12 @@ def main() -> None:
         ("--max-num-seqs", env("S1_MAX_NUM_SEQS", "64")),
         ("--generation-config", "vllm"),
     ]
-    offload = env("S1_KV_OFFLOAD_GB", defaults["offload"])
+    # Unset => role default on Linux, but 0 on WSL2: pre-faulting tens of GB of
+    # shared, GPU-registered host memory has taken the whole WSL2 VM down.
+    # Set S1_KV_OFFLOAD_GB explicitly to opt in (raise it gradually).
+    if not os.environ.get("S1_KV_OFFLOAD_GB") and in_wsl():
+        print(f"[serve_{ROLE}] WSL2: CPU KV offload disabled by default (set S1_KV_OFFLOAD_GB to enable)", flush=True)
+    offload = env("S1_KV_OFFLOAD_GB", "0" if in_wsl() else defaults["offload"])
     if offload != "0" and os.environ.get("S1_KV_OFFLOAD_PROBE", "1") != "0":
         fitted = probe_offload_gb(int(float(offload)))
         if str(fitted) != offload:

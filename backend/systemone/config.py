@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     api_port: int = 8000
     # Optional shared secret for LAN clients (sent as ``X-API-Key``).
     api_key: str | None = None
+    # Address the API/dashboard ports are published on (set by compose). On a
+    # non-loopback bind the API refuses to start without a real api_key.
+    bind_addr: str = "127.0.0.1"
     cors_origins: list[str] = Field(default_factory=lambda: ["*"])
 
     # ------------------------------------------------------ RAM datastore
@@ -56,6 +59,9 @@ class Settings(BaseSettings):
     student_container: str = "systemone-student"
     triage_container: str = "systemone-triage"
     trainer_image: str = "systemone/trainer:latest"
+    # Host-memory bounds for the one-shot trainer container.
+    trainer_mem_limit: str = "48g"
+    trainer_shm_size: str = "8g"
     # Host path of the shared workspace volume (models, datasets, state).
     workspace_host_path: str = "./workspace"
     workspace_container_path: str = "/workspace"

@@ -13,9 +13,9 @@
 
 | Consumer | Budget | Setting |
 |---|---|---|
-| Redis (replay, queues, datasets index) | 64 GB | `docker/redis/redis.conf` `maxmemory` |
-| Student vLLM CPU KV offload | 32 GB | `S1_KV_OFFLOAD_GB` |
-| Triage vLLM CPU KV offload | 16 GB | `S1_TRIAGE_KV_OFFLOAD_GB` |
+| Redis (replay, queues, datasets index) | 32 GB | `docker/redis/redis.conf` `maxmemory` (raise on a dedicated Linux host) |
+| Student vLLM CPU KV offload | 32 GB (0 on WSL2) | `S1_KV_OFFLOAD_GB` |
+| Triage vLLM CPU KV offload | 16 GB (0 on WSL2) | `S1_TRIAGE_KV_OFFLOAD_GB` |
 | OS, Docker, API, trainer dataloaders | ~8 GB | |
 
 Both vLLM containers start through `docker/student/serve_student.py`. It checks every
@@ -28,6 +28,34 @@ CPU KV offload uses vLLM's native offloading backend (`--kv-offloading-backend n
 connector through `S1_VLLM_EXTRA_ARGS` (triage: `S1_TRIAGE_VLLM_EXTRA_ARGS`), e.g. LMCache:
 `--kv-transfer-config '{"kv_connector":"LMCacheConnectorV1","kv_role":"kv_both"}'`.
 Older vLLM releases that still have `--swap-space` can use it via `S1_SWAP_SPACE_GB`.
+
+## Docker Desktop / WSL2 hosts: bring-up checklist
+
+Reference: Windows 11, 192 GB RAM, `.wslconfig` `memory=160GB`, 2x RTX 3090.
+
+1. **Secrets in `.env`.** `S1_REDIS_PASSWORD` is required, and compose refuses to start
+   without it (`openssl rand -hex 24`). Set `S1_API_KEY` (`openssl rand -hex 32`) before
+   setting `S1_BIND_ADDR=0.0.0.0`; the API refuses a LAN bind without a real key.
+2. **Ports.** Everything is on 127.0.0.1 by default. API 8090 and dashboard 3090 follow
+   `S1_BIND_ADDR`. Redis 6379 and the raw vLLM servers (8091/8092, no auth) are always
+   host-local. The dashboard is built to call `S1_API_PORT`, so rebuild it after changing that.
+3. **GPU isolation.** Docker Desktop ignores `device_ids` / `NVIDIA_VISIBLE_DEVICES`, so every
+   container sees both GPUs. The vLLM launcher and the trainer detect this and set
+   `CUDA_VISIBLE_DEVICES` to `S1_GPU_INDEX` (student/trainer 0, triage 1; PCI bus order). On
+   native Linux the same compose file keeps working, because only one GPU is visible there. A
+   static `CUDA_VISIBLE_DEVICES=1` would hide triage's only GPU on native Linux.
+4. **Staged start.** Triage waits for a healthy student, and the API waits for both, so two
+   engines never load at once. Restart policies are `"no"`, so a VM crash can't turn into a
+   restart loop.
+5. **Memory.** `mem_limit` applies to redis (40g), student (48g), triage (32g), api (4g),
+   dashboard (1g) and the trainer (48g, private 8g `/dev/shm`, no `ipc: host`), each
+   overridable with `S1_*_MEM_LIMIT`. Redis `maxmemory` is 32gb. CPU KV offload is **0 by
+   default on WSL2**. Raise `S1_KV_OFFLOAD_GB` / `S1_TRIAGE_KV_OFFLOAD_GB` gradually while
+   watching `docker stats` and `vmmemWSL` in Task Manager. The offload regions live in the
+   shared `/dev/shm` (`ipc: host`) and may not count against a container's `mem_limit`.
+6. **Bring-up order:**
+   `docker compose up -d redis student` → wait for healthy → `docker compose up -d triage`
+   → healthy → `docker compose up -d api dashboard`.
 
 ## WSL2 / Docker Desktop hosts
 
@@ -57,10 +85,19 @@ free `/dev/shm` (`S1_KV_OFFLOAD_MAX_SHM_FRACTION`), so student and triage both f
 
 * NVIDIA driver ≥ 550, NVIDIA Container Toolkit, Docker Engine + Compose v2
 * About 100 GB free disk for Hugging Face caches and training runs (`./workspace`)
-* The API container mounts `/var/run/docker.sock` (to stop/start containers A/B) and runs with
-  `pid: host` (so NVML can attribute VRAM to processes). Anyone with access to the API can
-  therefore control Docker on the host. Set `S1_API_KEY`, and don't expose port 8000 beyond
-  your LAN.
+* The API container mounts `/var/run/docker.sock` to stop/start containers A/B, and runs as
+  root so it can use the socket. Anyone with access to the API can therefore control Docker on
+  the host. That's why it binds to 127.0.0.1 by default and refuses a LAN bind without a real
+  `S1_API_KEY`.
+
+## Pinning versions
+
+* **vLLM:** set `S1_VLLM_VERSION` in `.env` to the `vllm/vllm-openai` tag you validated;
+  the default is `latest`. The launcher tolerates CLI drift, but a pin keeps rebuilds
+  reproducible.
+* **Trainer:** `docker/trainer/requirements.txt` is not pinned yet. Each training run
+  records the exact package versions it used in `workspace/runs/<run>/result.json` under
+  `environment`. After a successful run, copy them into the file as `name==version`.
 
 ## Mac oracle
 
@@ -75,11 +112,11 @@ To verify connectivity from the Linux host: `curl http://<mac-ip>:11434/api/tags
 
 | Port | Service |
 |---|---|
-| 3000 | Dashboard |
-| 8000 | LAN REST + WebSocket API |
-| 8001 | Student vLLM (debug) |
-| 8002 | Triage vLLM (debug) |
-| 6379 | Redis |
+| 3090 | Dashboard (`S1_DASHBOARD_PORT`, bound to `S1_BIND_ADDR`) |
+| 8090 | REST + WebSocket API (`S1_API_PORT`, bound to `S1_BIND_ADDR`) |
+| 8091 | Student vLLM (debug, 127.0.0.1 only, no auth) |
+| 8092 | Triage vLLM (debug, 127.0.0.1 only, no auth) |
+| 6379 | Redis (127.0.0.1 only, password required) |
 | 11434 | Ollama on the Mac |
 
 ## Single-GPU or different hardware

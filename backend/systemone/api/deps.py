@@ -12,6 +12,7 @@ def get_rt(request: Request) -> Runtime:
 
 
 def _check_key(expected: str | None, provided: str | None) -> bool:
+    expected = expected or None  # S1_API_KEY= (empty) in .env means "no key"
     return expected is None or (provided is not None and secrets.compare_digest(expected, provided))
 
 

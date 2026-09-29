@@ -1,8 +1,11 @@
-# systemone-builder - Linux host stack (2x RTX 3090, 120GB RAM)
+# systemone-builder stack (2x RTX 3090). Runs on native Linux or on Docker
+# Desktop / WSL2. Memory limits, ports and offload sizes are all overridable
+# from .env - see .env.example.
 name: systemone
 
 x-s1-env: &s1-env
-  S1_REDIS_URL: redis://redis:6379/0
+  # Redis requires a password; the value comes from .env (S1_REDIS_PASSWORD).
+  S1_REDIS_URL: redis://:${S1_REDIS_PASSWORD:?set S1_REDIS_PASSWORD in .env (openssl rand -hex 24)}@redis:6379/0
   S1_DATA_DIR: /data
   # Named volume (fast native disk, incl. WSL2/Docker Desktop) or an absolute
   # host path. The orchestrator mounts the same source into the trainer.
@@ -15,12 +18,20 @@ services:
   redis:
     image: redis:7.4
     container_name: systemone-redis
-    command: ["redis-server", "/usr/local/etc/redis/redis.conf"]
+    command:
+      - redis-server
+      - /usr/local/etc/redis/redis.conf
+      - --requirepass
+      - ${S1_REDIS_PASSWORD:?set S1_REDIS_PASSWORD in .env (openssl rand -hex 24)}
+    environment:
+      # lets the healthcheck's redis-cli authenticate without the password on argv
+      REDISCLI_AUTH: ${S1_REDIS_PASSWORD}
     volumes:
       - ./docker/redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
       - redis_data:/data
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"   # host-local only; containers use the compose network
+    mem_limit: ${S1_REDIS_MEM_LIMIT:-40g}
     ulimits:
       nofile: 65535
     healthcheck:
@@ -41,19 +52,24 @@ services:
       <<: *s1-env
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DRIVER_CAPABILITIES: utility
-    # host PID namespace so NVML can attribute VRAM to processes
-    pid: host
+      # The API refuses to start on a non-loopback bind without a real S1_API_KEY.
+      S1_BIND_ADDR: ${S1_BIND_ADDR:-127.0.0.1}
+      S1_PUBLIC_API_PORT: ${S1_API_PORT:-8090}
+    # The Docker socket lets the orchestrator stop/start the student and launch
+    # the trainer. It is root-equivalent on the Docker VM: keep S1_API_KEY set
+    # and the API bound to 127.0.0.1 unless you need LAN access.
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${S1_WORKSPACE_VOLUME:-systemone-workspace}:/data/workspace
       - ./var/eval_results:/data/eval_results
       - ./var/domains:/data/domains
     ports:
-      - "8090:8000"
+      - "${S1_BIND_ADDR:-127.0.0.1}:${S1_API_PORT:-8090}:8000"
+    mem_limit: ${S1_API_MEM_LIMIT:-4g}
     depends_on:
       redis: { condition: service_healthy }
-      student: { condition: service_started }
-      triage: { condition: service_started }
+      student: { condition: service_healthy }
+      triage: { condition: service_healthy }
     deploy:
       resources:
         reservations:
@@ -75,6 +91,8 @@ services:
     environment:
       S1_API: http://api:8000
       S1_PUBLIC_HOST: ${S1_PUBLIC_HOST:-localhost}
+      S1_PUBLIC_API_PORT: ${S1_API_PORT:-8090}
+      S1_PUBLIC_DASHBOARD_PORT: ${S1_DASHBOARD_PORT:-3090}
       S1_QUICKSTART: ${S1_QUICKSTART:-1}
     entrypoint: ["sh", "-c", "[ \"$$S1_QUICKSTART\" = \"0\" ] && echo 'quickstart disabled' || exec systemone quickstart"]
     depends_on:
@@ -87,14 +105,20 @@ services:
       context: .
       dockerfile: docker/dashboard/Dockerfile
       args:
-        # empty = same host as the dashboard, port 8000 (works across the LAN)
+        # empty = same host as the dashboard, on NEXT_PUBLIC_S1_API_PORT
         NEXT_PUBLIC_S1_API_URL: ${S1_PUBLIC_API_URL:-}
+        NEXT_PUBLIC_S1_API_PORT: ${S1_API_PORT:-8090}
     image: systemone/dashboard:latest
     container_name: systemone-dashboard
     ports:
-      - "3090:3000"
+      - "${S1_BIND_ADDR:-127.0.0.1}:${S1_DASHBOARD_PORT:-3090}:3000"
+    mem_limit: ${S1_DASHBOARD_MEM_LIMIT:-1g}
     depends_on:
       - api
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/"]
+      interval: 15s
+      retries: 5
     restart: "no"
 
   # ------------------------------------------ GPU 0: Container B (student)
@@ -102,73 +126,86 @@ services:
     build:
       context: .
       dockerfile: docker/student/Dockerfile
+      args:
+        VLLM_IMAGE: vllm/vllm-openai:${S1_VLLM_VERSION:-latest}
     image: systemone/student:latest
     container_name: systemone-student
     env_file: [{ path: .env, required: false }]
     environment:
       S1_STUDENT_BASE_MODEL: ${S1_STUDENT_BASE_MODEL:-Qwen/Qwen2.5-1.5B-Instruct}
-      S1_GPU_INDEX: ${S1_STUDENT_GPU:-0}   # pinned if the runtime exposes every GPU (WSL2)
+      # Native Linux honours device_ids / NVIDIA_VISIBLE_DEVICES; Docker Desktop
+      # (WSL2) does not, so the launcher also pins CUDA_VISIBLE_DEVICES to
+      # S1_GPU_INDEX whenever it can see more than one GPU.
+      NVIDIA_VISIBLE_DEVICES: ${S1_STUDENT_GPU:-0}
+      S1_GPU_INDEX: ${S1_STUDENT_GPU:-0}
       CUDA_DEVICE_ORDER: PCI_BUS_ID
-      S1_KV_OFFLOAD_GB: ${S1_KV_OFFLOAD_GB:-32}
+      # empty = launcher default (32 GB on Linux, 0 on WSL2 where large pinned
+      # regions have taken the whole VM down)
+      S1_KV_OFFLOAD_GB: ${S1_KV_OFFLOAD_GB:-}
       HF_HOME: /workspace/hf_cache
       VLLM_CACHE_ROOT: /workspace/vllm_cache
       HF_TOKEN: ${HF_TOKEN:-}
     volumes:
       - ${S1_WORKSPACE_VOLUME:-systemone-workspace}:/workspace
     ports:
-      - "8091:8000"
+      - "127.0.0.1:${S1_STUDENT_PORT:-8091}:8000"   # raw vLLM, no auth: host-local only
     ipc: host
+    mem_limit: ${S1_STUDENT_MEM_LIMIT:-48g}
     deploy:
       resources:
         reservations:
           devices:
             - driver: nvidia
-              device_ids: ["0"]
+              device_ids: ["${S1_STUDENT_GPU:-0}"]
               capabilities: [gpu]
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 10s
-      start_period: 300s
+      start_period: 900s
       retries: 30
     # The lifecycle orchestrator stops/starts this container around training;
     # never let Docker restart it behind the orchestrator's back.
     restart: "no"
 
   # ------------------------------------------ GPU 1: Container C (triage)
+  # Starts only after the student is healthy, so two engines never load
+  # weights and allocate memory at the same time.
   triage:
     image: systemone/student:latest   # same vLLM launcher, triage role
     container_name: systemone-triage
     env_file: [{ path: .env, required: false }]
     environment:
       S1_VLLM_ROLE: triage
-      S1_GPU_INDEX: ${S1_TRIAGE_GPU:-1}    # pinned if the runtime exposes every GPU (WSL2)
+      NVIDIA_VISIBLE_DEVICES: ${S1_TRIAGE_GPU:-1}
+      S1_GPU_INDEX: ${S1_TRIAGE_GPU:-1}
       CUDA_DEVICE_ORDER: PCI_BUS_ID
       S1_TRIAGE_MODEL: ${S1_TRIAGE_MODEL:-Qwen/Qwen2.5-14B-Instruct-AWQ}
       S1_GPU_MEMORY_UTILIZATION: ${S1_TRIAGE_GPU_MEMORY_UTILIZATION:-0.90}
       S1_MAX_MODEL_LEN: ${S1_TRIAGE_MAX_MODEL_LEN:-16384}
-      S1_KV_OFFLOAD_GB: ${S1_TRIAGE_KV_OFFLOAD_GB:-16}
+      S1_KV_OFFLOAD_GB: ${S1_TRIAGE_KV_OFFLOAD_GB:-}
       S1_VLLM_EXTRA_ARGS: ${S1_TRIAGE_VLLM_EXTRA_ARGS:-}
       HF_HOME: /workspace/hf_cache
       VLLM_CACHE_ROOT: /workspace/vllm_cache
       HF_TOKEN: ${HF_TOKEN:-}
     depends_on:
-      - student   # ensures the shared launcher image is built first
+      student: { condition: service_healthy }
     volumes:
       - ${S1_WORKSPACE_VOLUME:-systemone-workspace}:/workspace
     ports:
-      - "8092:8000"
+      - "127.0.0.1:${S1_TRIAGE_PORT:-8092}:8000"    # raw vLLM, no auth: host-local only
     ipc: host
+    mem_limit: ${S1_TRIAGE_MEM_LIMIT:-32g}
     deploy:
       resources:
         reservations:
           devices:
             - driver: nvidia
-              device_ids: ["1"]
+              device_ids: ["${S1_TRIAGE_GPU:-1}"]
               capabilities: [gpu]
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 10s
-      start_period: 600s
+      start_period: 900s
       retries: 60
     restart: "no"
 

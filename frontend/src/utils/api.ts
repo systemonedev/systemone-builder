@@ -1,14 +1,16 @@
 // REST client for the systemone LAN API.
 //
-// The API base defaults to port 8000 on the same host that serves the
-// dashboard, so opening http://<linux-host>:3000 from any LAN machine works.
-// NEXT_PUBLIC_S1_API_URL overrides it; the X-API-Key is kept per browser.
+// The API base defaults to the same host that serves the dashboard, on the
+// published API port (NEXT_PUBLIC_S1_API_PORT, baked in at build time from
+// S1_API_PORT). NEXT_PUBLIC_S1_API_URL overrides it; the X-API-Key is kept per browser.
+
+const API_PORT = process.env.NEXT_PUBLIC_S1_API_PORT || "8090";
 
 export function apiBase(): string {
   const env = process.env.NEXT_PUBLIC_S1_API_URL;
   if (env) return env.replace(/\/$/, "");
-  if (typeof window === "undefined") return "http://localhost:8000";
-  return `${window.location.protocol}//${window.location.hostname}:8000`;
+  if (typeof window === "undefined") return `http://localhost:${API_PORT}`;
+  return `${window.location.protocol}//${window.location.hostname}:${API_PORT}`;
 }
 
 export function apiKey(): string | null {

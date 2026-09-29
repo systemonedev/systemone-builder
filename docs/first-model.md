@@ -33,7 +33,8 @@ cp .env.example .env
 | Variable | Set it to |
 |---|---|
 | `S1_ORACLE_URL` | `http://<mac-ip>:11434` (a Tailscale IP works) |
-| `S1_API_KEY` | any secret; enter the same value in the dashboard sidebar |
+| `S1_REDIS_PASSWORD` | **required**: `openssl rand -hex 24` (compose won't start without it) |
+| `S1_API_KEY` | `openssl rand -hex 32`; enter the same value in the dashboard sidebar. Required before `S1_BIND_ADDR=0.0.0.0` |
 | `HF_TOKEN` | only needed for gated models (Llama, Gemma) |
 
 ### 0.3 WSL2 / Docker Desktop
@@ -55,7 +56,7 @@ docker compose build            # api, student/triage launcher, trainer, dashboa
 docker compose up -d
 ```
 
-Open **http://&lt;host&gt;:3000**. The sidebar lists every service with its state:
+Open **http://&lt;host&gt;:3090**. The sidebar lists every service with its state:
 
 | State | Meaning |
 |---|---|
@@ -136,7 +137,7 @@ Pick one of:
 - **From a starter template.** `computer_use`, `secops`, `desktop_vision` or
   `auth_log_bruteforce`:
   ```bash
-  curl -X POST localhost:8000/api/v1/templates/auth_log_bruteforce/install \
+  curl -X POST localhost:8090/api/v1/templates/auth_log_bruteforce/install \
        -H 'content-type: application/json' -H "X-API-Key: $S1_API_KEY" -d '{"bootstrap": true}'
   ```
 
@@ -153,7 +154,7 @@ sources, and you can combine them:
    one, and the LLM judge filters the results. Watch *accepted / rejected* grow.
 2. **Your real labelled data.** Import it in bulk:
    ```bash
-   curl -X POST localhost:8000/api/v1/datasets/<domain>/sft/bulk -H 'content-type: application/json' \
+   curl -X POST localhost:8090/api/v1/datasets/<domain>/sft/bulk -H 'content-type: application/json' \
         -H "X-API-Key: $S1_API_KEY" -d @samples.json   # [{"state": {...}, "action": {...}}, ...]
    ```
 3. **Live traffic** (the self-improving path). Point your client at `POST /api/v1/act/<domain>`

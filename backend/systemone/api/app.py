@@ -16,10 +16,32 @@ from systemone.config import Settings, get_settings
 from systemone.runtime import Runtime
 
 API_PREFIX = "/api/v1"
+LOOPBACK = {"127.0.0.1", "localhost", "::1"}
+WEAK_KEYS = {"", "change-me", "changeme", "secret", "password"}
+
+log = logging.getLogger("systemone.api")
+
+
+def check_exposure(settings: Settings) -> None:
+    """Refuse to serve beyond loopback without a real API key.
+
+    The API holds the Docker socket (root-equivalent on the Docker host/VM), so
+    publishing it on the LAN with no or a placeholder key would hand that out.
+    """
+    key = settings.api_key or ""
+    weak = key.strip().lower() in WEAK_KEYS or len(key) < 16
+    if settings.bind_addr not in LOOPBACK and weak:
+        raise RuntimeError(
+            f"S1_BIND_ADDR={settings.bind_addr} exposes the API beyond this host but S1_API_KEY is "
+            "missing or weak. Set S1_API_KEY to a random secret (openssl rand -hex 32) or bind to 127.0.0.1."
+        )
+    if weak:
+        log.warning("S1_API_KEY is missing or weak; acceptable only while the API is bound to loopback")
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
+    check_exposure(settings)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
