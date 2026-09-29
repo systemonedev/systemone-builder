@@ -53,9 +53,31 @@ Reference: Windows 11, 192 GB RAM, `.wslconfig` `memory=160GB`, 2x RTX 3090.
    default on WSL2**. Raise `S1_KV_OFFLOAD_GB` / `S1_TRIAGE_KV_OFFLOAD_GB` gradually while
    watching `docker stats` and `vmmemWSL` in Task Manager. The offload regions live in the
    shared `/dev/shm` (`ipc: host`) and may not count against a container's `mem_limit`.
-6. **Bring-up order:**
+6. **WSL2 safe mode for triage.** Under WSL2 the triage server starts by default with
+   vLLM's V1 model runner, no pinned host memory and `--enforce-eager` (no torch.compile /
+   CUDA-graph capture): the paths most likely to take the VM down while a large model loads.
+   The log line `WSL2 safe mode: …` confirms it. Controls: `S1_TRIAGE_SAFE_MODE` /
+   `S1_STUDENT_SAFE_MODE` (`1` on, `0` off, unset = auto). The API waits for triage to
+   *start*, not to be healthy, so a failing triage no longer keeps the dashboard down.
+7. **Bring-up order:**
    `docker compose up -d redis student` → wait for healthy → `docker compose up -d triage`
    → healthy → `docker compose up -d api dashboard`.
+8. **If the VM still dies while triage loads**, capture evidence first, because container logs
+   vanish with the engine. In two PowerShell windows, before starting triage:
+   ```powershell
+   wsl -d docker-desktop -e dmesg -w | Tee-Object triage-dmesg.log
+   docker compose logs -f --no-log-prefix triage | Tee-Object triage.log
+   ```
+   Then walk the triage settings down one step at a time, recreating only triage each time:
+   | Step | `.env` | What it rules out |
+   |---|---|---|
+   | a | defaults (safe mode on) | torch.compile, CUDA graphs, pinned memory |
+   | b | `S1_TRIAGE_MAX_MODEL_LEN=8192`, `S1_TRIAGE_GPU_MEMORY_UTILIZATION=0.80` | KV-cache allocation size |
+   | c | `S1_TRIAGE_MODEL=Qwen/Qwen2.5-7B-Instruct-AWQ` | model size |
+   | d | `S1_TRIAGE_MODEL=Qwen/Qwen2.5-7B-Instruct` (unquantized) | the AWQ / Marlin kernel path |
+
+   The last line of `triage.log` and any `dxg`, `nvidia` or `Out of memory` lines in
+   `triage-dmesg.log` identify the stage that kills the VM.
 
 ## WSL2 / Docker Desktop hosts
 

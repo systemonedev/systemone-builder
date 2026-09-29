@@ -198,6 +198,16 @@ def probe_offload_gb(requested: int) -> int:
     return 0
 
 
+def wsl_safe_mode() -> bool:
+    """S1_VLLM_SAFE_MODE: 1 = on, 0 = off, unset/auto = on for triage under WSL2."""
+    v = os.environ.get("S1_VLLM_SAFE_MODE", "").strip().lower()
+    if v in ("1", "true", "on", "yes"):
+        return True
+    if v in ("0", "false", "off", "no"):
+        return False
+    return in_wsl() and ROLE == "triage"
+
+
 def log_memory_budget() -> None:
     """Print the memory this container may use, so logs show each engine's budget."""
     limit = None
@@ -223,7 +233,22 @@ def main() -> None:
     warn_slow_storage()
     if os.environ.get("S1_CLEAN_SHM", "1") != "0":
         clean_stale_offload_files()
-    if in_wsl() and "VLLM_WSL2_ENABLE_PIN_MEMORY" not in os.environ:
+    # vLLM parses these with int(): an empty value (e.g. "VAR=" in .env or an
+    # empty compose default) crashes it, so treat empty as unset.
+    for var in ("VLLM_WSL2_ENABLE_PIN_MEMORY", "VLLM_USE_V2_MODEL_RUNNER"):
+        if os.environ.get(var) == "":
+            del os.environ[var]
+    safe = wsl_safe_mode()
+    if safe:
+        # Conservative WSL2 profile: the V1 model runner (needs no pinned/UVA
+        # buffers), no pinned host memory, and no torch.compile / CUDA-graph
+        # capture. Slower per token, but avoids the paths that have taken
+        # the whole WSL2 VM down while a model was loading.
+        os.environ.setdefault("VLLM_USE_V2_MODEL_RUNNER", "0")
+        os.environ.setdefault("VLLM_WSL2_ENABLE_PIN_MEMORY", "0")
+        print(f"[serve_{ROLE}] WSL2 safe mode: V1 model runner, no pinned memory, --enforce-eager "
+              f"(S1_VLLM_SAFE_MODE=0 to disable)", flush=True)
+    elif in_wsl() and "VLLM_WSL2_ENABLE_PIN_MEMORY" not in os.environ:
         # vLLM disables pinned memory under WSL2 by default, and its V2 model
         # runner cannot start without it ("RuntimeError: UVA is not available").
         # WSL2 kernels >= 4.19.121 support pinned memory; set
@@ -256,6 +281,8 @@ def main() -> None:
         ("--max-num-seqs", env("S1_MAX_NUM_SEQS", "64")),
         ("--generation-config", "vllm"),
     ]
+    if safe:
+        optional.append(("--enforce-eager", None))
     # Unset => role default on Linux, but 0 on WSL2: pre-faulting tens of GB of
     # shared, GPU-registered host memory has taken the whole WSL2 VM down.
     # Set S1_KV_OFFLOAD_GB explicitly to opt in (raise it gradually).
