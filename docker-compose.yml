@@ -27,7 +27,7 @@ services:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       retries: 10
-    restart: unless-stopped
+    restart: "no"
 
   # ------------------------------------------------- orchestrator + LAN API
   api:
@@ -49,7 +49,7 @@ services:
       - ./var/eval_results:/data/eval_results
       - ./var/domains:/data/domains
     ports:
-      - "8000:8000"
+      - "8090:8000"
     depends_on:
       redis: { condition: service_healthy }
       student: { condition: service_started }
@@ -61,7 +61,7 @@ services:
             - driver: nvidia
               count: all
               capabilities: [utility]
-    restart: unless-stopped
+    restart: "no"
 
   # ------------------------------------------ Zero-to-One Quickstart (one-shot)
   # Loads the dummy web-automation dataset, runs the first strict
@@ -92,10 +92,10 @@ services:
     image: systemone/dashboard:latest
     container_name: systemone-dashboard
     ports:
-      - "3000:3000"
+      - "3090:3000"
     depends_on:
       - api
-    restart: unless-stopped
+    restart: "no"
 
   # ------------------------------------------ GPU 0: Container B (student)
   student:
@@ -116,7 +116,7 @@ services:
     volumes:
       - ${S1_WORKSPACE_VOLUME:-systemone-workspace}:/workspace
     ports:
-      - "8001:8000"
+      - "8091:8000"
     ipc: host
     deploy:
       resources:
@@ -156,7 +156,7 @@ services:
     volumes:
       - ${S1_WORKSPACE_VOLUME:-systemone-workspace}:/workspace
     ports:
-      - "8002:8000"
+      - "8092:8000"
     ipc: host
     deploy:
       resources:
@@ -170,7 +170,7 @@ services:
       interval: 10s
       start_period: 600s
       retries: 60
-    restart: unless-stopped
+    restart: "no"
 
   # ------------------------------------------ GPU 0: Container A (trainer)
   # Built by `docker compose up` so the image exists, then exits at once.
