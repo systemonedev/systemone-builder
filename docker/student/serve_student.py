@@ -199,13 +199,8 @@ def probe_offload_gb(requested: int) -> int:
 
 
 def wsl_safe_mode() -> bool:
-    """S1_VLLM_SAFE_MODE: 1 = on, 0 = off, unset/auto = on for triage under WSL2."""
-    v = os.environ.get("S1_VLLM_SAFE_MODE", "").strip().lower()
-    if v in ("1", "true", "on", "yes"):
-        return True
-    if v in ("0", "false", "off", "no"):
-        return False
-    return in_wsl() and ROLE == "triage"
+    """S1_VLLM_SAFE_MODE: 1 = --enforce-eager, anything else = off (the default)."""
+    return os.environ.get("S1_VLLM_SAFE_MODE", "").strip().lower() in ("1", "true", "on", "yes")
 
 
 def log_memory_budget() -> None:
@@ -255,7 +250,7 @@ def main() -> None:
     if safe:
         # No torch.compile / CUDA-graph capture at startup: slower per token,
         # but the fewest moving parts while a model loads under WSL2.
-        print(f"[serve_{ROLE}] WSL2 safe mode: --enforce-eager (S1_VLLM_SAFE_MODE=0 to disable)", flush=True)
+        print(f"[serve_{ROLE}] safe mode: --enforce-eager (unset S1_VLLM_SAFE_MODE to disable)", flush=True)
     if ROLE == "triage":
         model = env("S1_TRIAGE_MODEL", "Qwen/Qwen2.5-14B-Instruct-AWQ")
         served, lora = model, None
@@ -276,12 +271,21 @@ def main() -> None:
         "--max-model-len", env("S1_MAX_MODEL_LEN", defaults["len"]),
     ]
     # (flag, value or None) - each dropped if this vLLM does not know it
-    optional: list[tuple[str, str | None]] = [
-        ("--enable-prefix-caching", None),
-        ("--enable-prompt-tokens-details", None),
-        ("--max-num-seqs", env("S1_MAX_NUM_SEQS", "64")),
-        ("--generation-config", "vllm"),
-    ]
+    if ROLE == "triage":
+        # Same launch as the mindoril vLLM servers, which run AWQ models on this
+        # machine's GPU 1 without trouble: few sequences, chunked prefill, fp16.
+        optional: list[tuple[str, str | None]] = [
+            ("--dtype", env("S1_DTYPE", "half")),
+            ("--max-num-seqs", env("S1_MAX_NUM_SEQS", "3")),
+            ("--enable-chunked-prefill", None),
+        ]
+    else:
+        optional = [
+            ("--enable-prefix-caching", None),
+            ("--enable-prompt-tokens-details", None),
+            ("--max-num-seqs", env("S1_MAX_NUM_SEQS", "64")),
+            ("--generation-config", "vllm"),
+        ]
     if safe:
         optional.append(("--enforce-eager", None))
     # Unset => role default on Linux, but 0 on WSL2: pre-faulting tens of GB of

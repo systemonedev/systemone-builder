@@ -39,26 +39,27 @@ Reference: Windows 11, 192 GB RAM, `.wslconfig` `memory=160GB`, 2x RTX 3090.
 2. **Ports.** Everything is on 127.0.0.1 by default. API 8090 and dashboard 3090 follow
    `S1_BIND_ADDR`. Redis 6379 and the raw vLLM servers (8091/8092, no auth) are always
    host-local. The dashboard is built to call `S1_API_PORT`, so rebuild it after changing that.
-3. **GPU isolation.** Docker Desktop ignores `device_ids` / `NVIDIA_VISIBLE_DEVICES`, so every
-   container sees both GPUs. The vLLM launcher and the trainer detect this and set
-   `CUDA_VISIBLE_DEVICES` to `S1_GPU_INDEX` (student/trainer 0, triage 1; PCI bus order). On
-   native Linux the same compose file keeps working, because only one GPU is visible there. A
-   static `CUDA_VISIBLE_DEVICES=1` would hide triage's only GPU on native Linux.
+3. **GPU isolation.** The vLLM services use the same pattern as the mindoril stacks, which run
+   stably on this machine: `device_ids`, `NVIDIA_VISIBLE_DEVICES` and `CUDA_VISIBLE_DEVICES` all
+   set to the same index (student 0, triage 1; PCI bus order). Docker Desktop exposes every GPU
+   to every container, so `CUDA_VISIBLE_DEVICES` does the real pinning. On native Linux only the
+   reserved GPU is visible, so set `S1_STUDENT_CUDA_DEVICE=0` and `S1_TRIAGE_CUDA_DEVICE=0`
+   there. The trainer pins itself the same way at runtime.
 4. **Staged start.** Triage waits for a healthy student, and the API waits for both, so two
    engines never load at once. Restart policies are `"no"`, so a VM crash can't turn into a
    restart loop.
-5. **Memory.** `mem_limit` applies to redis (40g), student (48g), triage (32g), api (4g),
-   dashboard (1g) and the trainer (48g, private 8g `/dev/shm`, no `ipc: host`), each
-   overridable with `S1_*_MEM_LIMIT`. Redis `maxmemory` is 32gb. CPU KV offload is **0 by
-   default on WSL2**. Raise `S1_KV_OFFLOAD_GB` / `S1_TRIAGE_KV_OFFLOAD_GB` gradually while
-   watching `docker stats` and `vmmemWSL` in Task Manager. The offload regions live in the
-   shared `/dev/shm` (`ipc: host`) and may not count against a container's `mem_limit`.
-6. **WSL2: no pinned memory, V1 runner, safe mode for triage.** Under WSL2 both vLLM
+5. **Memory.** `mem_limit` applies to redis (40g), api (4g), dashboard (1g) and the trainer
+   (48g, private 8g `/dev/shm`), each overridable with `S1_*_MEM_LIMIT`. Redis `maxmemory` is
+   32gb. Like mindoril's, the vLLM containers have no `mem_limit` and no `ipc: host`. CPU KV
+   offload is **0 by default on WSL2**. Without `ipc: host` a container's `/dev/shm` is only
+   64 MB, so using offload would also need a `shm_size` on that service.
+6. **WSL2: no pinned memory, V1 runner, mindoril-style triage.** Under WSL2 both vLLM
    servers run without pinned host memory and with the V1 model runner (see "Pinned memory
-   stays off" below). Triage also defaults to `--enforce-eager` (no torch.compile /
-   CUDA-graph capture). The log lines `pinned memory off` and `WSL2 safe mode: …` confirm it. Controls: `S1_TRIAGE_SAFE_MODE` /
-   `S1_STUDENT_SAFE_MODE` (`1` on, `0` off, unset = auto). The API waits for triage to
-   *start*, not to be healthy, so a failing triage no longer keeps the dashboard down.
+   stays off" below); the log line `pinned memory off` confirms it. Triage starts with the
+   same flags as mindoril: `--dtype half --max-num-seqs 3 --enable-chunked-prefill`
+   (`S1_TRIAGE_MAX_NUM_SEQS` to change). `S1_TRIAGE_SAFE_MODE=1` / `S1_STUDENT_SAFE_MODE=1`
+   add `--enforce-eager`. The API waits for triage to *start*, not to be healthy, so a
+   failing triage doesn't keep the dashboard down.
 7. **Bring-up order:**
    `docker compose up -d redis student` → wait for healthy → `docker compose up -d triage`
    → healthy → `docker compose up -d api dashboard`.
@@ -71,7 +72,7 @@ Reference: Windows 11, 192 GB RAM, `.wslconfig` `memory=160GB`, 2x RTX 3090.
    Then walk the triage settings down one step at a time, recreating only triage each time:
    | Step | `.env` | What it rules out |
    |---|---|---|
-   | a | defaults (safe mode on, pinned memory off) | torch.compile, CUDA graphs, pinned memory |
+   | a | `S1_TRIAGE_SAFE_MODE=1` | torch.compile, CUDA graphs |
    | b | `S1_TRIAGE_MAX_MODEL_LEN=8192`, `S1_TRIAGE_GPU_MEMORY_UTILIZATION=0.80` | KV-cache allocation size |
    | c | `S1_TRIAGE_MODEL=Qwen/Qwen2.5-7B-Instruct-AWQ` | model size |
    | d | `S1_TRIAGE_MODEL=Qwen/Qwen2.5-7B-Instruct` (unquantized) | the AWQ / Marlin kernel path |
@@ -107,8 +108,8 @@ performs the same `madvise(MADV_POPULATE_WRITE)` call vLLM uses, halving the siz
 succeeds, or disabling offload if nothing fits. You can set the sizes explicitly with
 `S1_KV_OFFLOAD_GB` / `S1_TRIAGE_KV_OFFLOAD_GB`; `S1_KV_OFFLOAD_PROBE=0` skips the probe.
 
-Both vLLM containers use `ipc: host`, so offload regions live in the host's `/dev/shm`,
-which WSL2 sizes at half the VM's memory by default. The launcher removes offload files left
+Offload regions live in the container's `/dev/shm`. The vLLM services no longer use
+`ipc: host`, so give a service a `shm_size` before enabling offload on it. The launcher removes offload files left
 by crashed engines (`S1_CLEAN_SHM=0` disables this). It also caps each instance at 45% of the
 free `/dev/shm` (`S1_KV_OFFLOAD_MAX_SHM_FRACTION`), so student and triage both fit. Also raise the VM's memory in `%UserProfile%\.wslconfig` (`memory=`) so that Redis's
 64 GB and the offload buffers fit.

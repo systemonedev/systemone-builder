@@ -136,17 +136,18 @@ services:
     env_file: [{ path: .env, required: false }]
     environment:
       S1_STUDENT_BASE_MODEL: ${S1_STUDENT_BASE_MODEL:-Qwen/Qwen2.5-1.5B-Instruct}
-      # Native Linux honours device_ids / NVIDIA_VISIBLE_DEVICES; Docker Desktop
-      # (WSL2) does not, so the launcher also pins CUDA_VISIBLE_DEVICES to
-      # S1_GPU_INDEX whenever it can see more than one GPU.
+      # GPU selection follows the mindoril stacks that run stably on this
+      # machine: device_ids + NVIDIA_VISIBLE_DEVICES + CUDA_VISIBLE_DEVICES, all
+      # the same index. Docker Desktop (WSL2) exposes every GPU, so
+      # CUDA_VISIBLE_DEVICES does the real pinning. On native Linux only the
+      # reserved GPU is visible: set S1_STUDENT_CUDA_DEVICE=0 there.
       NVIDIA_VISIBLE_DEVICES: ${S1_STUDENT_GPU:-0}
+      CUDA_VISIBLE_DEVICES: ${S1_STUDENT_CUDA_DEVICE:-${S1_STUDENT_GPU:-0}}
       S1_GPU_INDEX: ${S1_STUDENT_GPU:-0}
       CUDA_DEVICE_ORDER: PCI_BUS_ID
-      # empty = launcher default (32 GB on Linux, 0 on WSL2 where large pinned
-      # regions have taken the whole VM down)
+      # empty = launcher default (32 GB on Linux, 0 on WSL2)
       S1_KV_OFFLOAD_GB: ${S1_KV_OFFLOAD_GB:-}
-      # empty = auto (off for the student); 1 = --enforce-eager. Under WSL2 pinned
-      # memory is always off and the V1 runner is used, safe mode or not.
+      # 1 = --enforce-eager; unset = off. Under WSL2 pinned memory is always off.
       S1_VLLM_SAFE_MODE: ${S1_STUDENT_SAFE_MODE:-}
       HF_HOME: /workspace/hf_cache
       VLLM_CACHE_ROOT: /workspace/vllm_cache
@@ -155,8 +156,9 @@ services:
       - ${S1_WORKSPACE_VOLUME:-systemone-workspace}:/workspace
     ports:
       - "127.0.0.1:${S1_STUDENT_PORT:-8091}:8000"   # raw vLLM, no auth: host-local only
-    ipc: host
-    mem_limit: ${S1_STUDENT_MEM_LIMIT:-48g}
+    # No ipc: host and no mem_limit, as in the mindoril vLLM services.
+    stop_signal: SIGTERM
+    stop_grace_period: 120s
     deploy:
       resources:
         reservations:
@@ -183,6 +185,8 @@ services:
     environment:
       S1_VLLM_ROLE: triage
       NVIDIA_VISIBLE_DEVICES: ${S1_TRIAGE_GPU:-1}
+      # native Linux: set S1_TRIAGE_CUDA_DEVICE=0 (see the student's note)
+      CUDA_VISIBLE_DEVICES: ${S1_TRIAGE_CUDA_DEVICE:-${S1_TRIAGE_GPU:-1}}
       S1_GPU_INDEX: ${S1_TRIAGE_GPU:-1}
       CUDA_DEVICE_ORDER: PCI_BUS_ID
       S1_TRIAGE_MODEL: ${S1_TRIAGE_MODEL:-Qwen/Qwen2.5-14B-Instruct-AWQ}
@@ -190,8 +194,11 @@ services:
       S1_MAX_MODEL_LEN: ${S1_TRIAGE_MAX_MODEL_LEN:-16384}
       S1_KV_OFFLOAD_GB: ${S1_TRIAGE_KV_OFFLOAD_GB:-}
       S1_VLLM_EXTRA_ARGS: ${S1_TRIAGE_VLLM_EXTRA_ARGS:-}
-      # empty = auto (on under WSL2): --enforce-eager
+      # 1 = --enforce-eager; unset = off (mindoril runs without it)
       S1_VLLM_SAFE_MODE: ${S1_TRIAGE_SAFE_MODE:-}
+      # launcher defaults for triage match mindoril: --dtype half,
+      # --max-num-seqs 3, --enable-chunked-prefill
+      S1_MAX_NUM_SEQS: ${S1_TRIAGE_MAX_NUM_SEQS:-}
       HF_HOME: /workspace/hf_cache
       VLLM_CACHE_ROOT: /workspace/vllm_cache
       HF_TOKEN: ${HF_TOKEN:-}
@@ -201,8 +208,9 @@ services:
       - ${S1_WORKSPACE_VOLUME:-systemone-workspace}:/workspace
     ports:
       - "127.0.0.1:${S1_TRIAGE_PORT:-8092}:8000"    # raw vLLM, no auth: host-local only
-    ipc: host
-    mem_limit: ${S1_TRIAGE_MEM_LIMIT:-32g}
+    # No ipc: host and no mem_limit, as in the mindoril vLLM services.
+    stop_signal: SIGTERM
+    stop_grace_period: 120s
     deploy:
       resources:
         reservations:
