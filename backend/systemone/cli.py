@@ -85,6 +85,29 @@ def cmd_s1_bench(a: argparse.Namespace) -> int:
     return asyncio.run(go())
 
 
+def cmd_s1_data(a: argparse.Namespace) -> int:
+    """Write System One training rows (JSONL) for the built-in phishing task."""
+    from pathlib import Path
+
+    from systemone.config import get_settings
+    from systemone.s1.bench import phishing_suite
+    from systemone.s1model.data import phishing_training_rows
+
+    s = get_settings()
+    cache = s.data_dir / "s1_bench_cache"
+
+    async def go() -> int:
+        await phishing_suite(a.bench_n, a.bench_seed, cache)  # make sure the benchmark set exists to exclude it
+        rows = await phishing_training_rows(a.n, a.seed, cache)
+        out = Path(a.out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text("".join(json.dumps(r) + "\n" for r in rows))
+        print(f"wrote {len(rows)} rows to {out}")
+        return 0
+
+    return asyncio.run(go())
+
+
 def cmd_doctor(_: argparse.Namespace) -> int:
     """Check the local host against the reference topology."""
     from systemone.adapters.byom import resolve
@@ -202,7 +225,7 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--suite", default="phishing", help="'phishing' (built in) or a JSONL file of {id, state, labels}")
     b.add_argument("--questions", help="questions JSON for a JSONL suite ({qid: {type, instructions, criteria}})")
     b.add_argument("--gate", help="noul question used for automation metrics (default: first noul)")
-    b.add_argument("--engines", default="local,jev,llm", help="comma-separated: local, jev, llm")
+    b.add_argument("--engines", default="s1,jev,local", help="comma-separated: s1, jev, local, llm (slow)")
     b.add_argument("-n", type=int, default=50, help="items to sample for the built-in suite")
     b.add_argument("--seed", type=int, default=42)
     b.add_argument("--concurrency", type=int, default=8)
@@ -211,6 +234,13 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--repeat-check", type=int, default=10, help="items asked twice to check determinism (0 = off)")
     b.add_argument("--out", help="directory for the JSON results (default: <data_dir>/eval_results)")
     b.set_defaults(fn=cmd_s1_bench)
+    d = sub.add_parser("s1-data", help="write System One training rows for the phishing task (benchmark emails excluded)")
+    d.add_argument("--out", default="/data/workspace/s1/datasets/phishing-train.jsonl")
+    d.add_argument("-n", type=int, default=4000)
+    d.add_argument("--seed", type=int, default=7)
+    d.add_argument("--bench-n", type=int, default=50, help="benchmark suite size to exclude (as used by s1-bench)")
+    d.add_argument("--bench-seed", type=int, default=42)
+    d.set_defaults(fn=cmd_s1_data)
     a = p.parse_args(argv)
     return a.fn(a)
 

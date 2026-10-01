@@ -58,13 +58,15 @@ class SystemOneEngine(abc.ABC):
 
 # ------------------------------------------------------------------- Jev
 class JevEngine(SystemOneEngine):
-    """TypeSafe Jev over HTTP (``POST {base_url}/v1/systemone``)."""
+    """Anything speaking Jev's ``POST {base_url}/v1/systemone``: TypeSafe Jev itself,
+    or the local System One model server (``require_key=False``)."""
 
     def __init__(self, api_key: str | None, base_url: str = "https://api.typesafe.ai", model: str = "jev-latest",
-                 timeout_s: float = 30.0) -> None:
+                 timeout_s: float = 30.0, require_key: bool = True, name: str | None = None) -> None:
         self.model = model
-        self.name = f"jev ({model})"
+        self.name = name or f"jev ({model})"
         self._key = api_key
+        self._require_key = require_key
         self.client = httpx.AsyncClient(
             base_url=base_url.rstrip("/"),
             timeout=httpx.Timeout(timeout_s, connect=5.0),
@@ -73,7 +75,7 @@ class JevEngine(SystemOneEngine):
         )
 
     async def answer(self, req: SystemOneRequest) -> SystemOneResponse:
-        if not self._key:
+        if self._require_key and not self._key:
             raise EngineError("no TypeSafe API key: set TYPESAFE_API_KEY in .env")
         body = {
             "state": req.state,
@@ -84,10 +86,10 @@ class JevEngine(SystemOneEngine):
         try:
             r = await self.client.post("/v1/systemone", json=body)
         except httpx.HTTPError as exc:
-            raise EngineError(f"Jev unreachable: {exc!r}") from exc
+            raise EngineError(f"{self.name} unreachable: {exc!r}") from exc
         latency = (time.perf_counter() - t0) * 1000
         if r.status_code != 200:
-            raise EngineError(f"Jev HTTP {r.status_code}: {r.text[:300]}")
+            raise EngineError(f"{self.name} HTTP {r.status_code}: {r.text[:300]}")
         out = SystemOneResponse.model_validate(r.json())
         out.latency_ms = latency
         return out

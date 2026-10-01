@@ -184,6 +184,45 @@ services:
     # never let Docker restart it behind the orchestrator's back.
     restart: "no"
 
+  # -------------------------------- GPU 0: the local System One model
+  # Non-generative cross-encoder answering the Jev contract (state + typed
+  # questions -> calibrated answers) at POST /v1/systemone. S1_SYSTEM_ONE_MODEL
+  # is a trained model directory in the workspace volume, or a Hugging Face
+  # cross-encoder for zero-shot use (the default). Needs ~2 GB of VRAM.
+  s1:
+    build:
+      context: .
+      dockerfile: docker/s1/Dockerfile
+    image: systemone/s1:latest
+    container_name: systemone-s1
+    environment:
+      S1_MODEL: ${S1_SYSTEM_ONE_MODEL:-MoritzLaurer/ModernBERT-large-zeroshot-v2.0}
+      HF_HOME: /workspace/hf_cache
+      HF_TOKEN: ${HF_TOKEN:-}
+      NVIDIA_VISIBLE_DEVICES: ${S1_SYSTEM_ONE_GPU:-0}
+      CUDA_VISIBLE_DEVICES: ${S1_SYSTEM_ONE_CUDA_DEVICE:-${S1_SYSTEM_ONE_GPU:-0}}
+      CUDA_DEVICE_ORDER: PCI_BUS_ID
+    volumes:
+      - ${S1_WORKSPACE_VOLUME:-systemone-workspace}:/workspace
+    ports:
+      - "127.0.0.1:${S1_SYSTEM_ONE_PORT:-8093}:8000"   # no auth: host-local only
+    mem_limit: ${S1_SYSTEM_ONE_MEM_LIMIT:-8g}
+    stop_signal: SIGTERM
+    stop_grace_period: 30s
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${S1_SYSTEM_ONE_GPU:-0}"]
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      start_period: 600s
+      retries: 30
+    restart: "no"
+
   # ------------------------------------------ GPU 1: Container C (triage)
   # Starts only after the student is healthy, so two engines never load
   # weights and allocate memory at the same time.

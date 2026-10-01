@@ -1,8 +1,10 @@
-"""System One API: the Jev contract served by the local engine.
+"""System One API: the Jev contract served locally.
 
 ``POST /api/v1/systemone`` takes and returns exactly what TypeSafe's
 ``POST /v1/systemone`` does, so a client can switch between Jev and the
-local model by changing only the base URL (and key).
+local model by changing only the base URL (and key). It is answered by the
+dedicated System One model (``S1_SYSTEM_ONE_BACKEND=model``, the default) or
+by the label-token readout of a local LLM (``logprob``).
 """
 
 from __future__ import annotations
@@ -13,15 +15,15 @@ from systemone.api.deps import get_rt
 from systemone.runtime import Runtime
 from systemone.s1.contract import SystemOneRequest, SystemOneResponse
 from systemone.s1.engines import EngineError, SystemOneEngine
-from systemone.s1.factory import build_engine
+from systemone.s1.factory import api_engine
 
 router = APIRouter(tags=["system-one"])
 
 
 def _engine(request: Request, rt: Runtime) -> SystemOneEngine:
-    engine = getattr(request.app.state, "s1_local", None)
+    engine = getattr(request.app.state, "s1_engine", None)
     if engine is None:
-        engine = request.app.state.s1_local = build_engine("local", rt.settings)
+        engine = request.app.state.s1_engine = api_engine(rt.settings)
     return engine
 
 

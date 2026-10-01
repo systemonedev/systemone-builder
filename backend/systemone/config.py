@@ -91,6 +91,11 @@ class Settings(BaseSettings):
     system_one_local_url: str | None = None
     system_one_local_model: str | None = None
     system_one_concurrency: int = 16
+    # The dedicated System One model server (compose service ``s1``).
+    system_one_model_url: str = "http://s1:8000"
+    # What answers POST /api/v1/systemone: "model" (the s1 server) or
+    # "logprob" (the label-token readout of a local LLM above).
+    system_one_backend: str = "model"
     # TypeSafe Jev, the reference System One model we benchmark against. Its
     # key is TYPESAFE_API_KEY (the name TypeSafe's SDKs use, no S1_ prefix);
     # S1_API_KEY only protects this project's own API.
