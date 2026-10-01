@@ -14,7 +14,7 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -91,10 +91,12 @@ class Settings(BaseSettings):
     system_one_local_url: str | None = None
     system_one_local_model: str | None = None
     system_one_concurrency: int = 16
-    # TypeSafe Jev, the reference System One model we benchmark against.
-    # Authenticated with S1_API_KEY for now (to be renamed to a TypeSafe key).
+    # TypeSafe Jev, the reference System One model we benchmark against. Its
+    # key is TYPESAFE_API_KEY (the name TypeSafe's SDKs use, no S1_ prefix);
+    # S1_API_KEY only protects this project's own API.
     typesafe_url: str = "https://api.typesafe.ai"
     typesafe_model: str = "jev-latest"
+    typesafe_api_key: str | None = Field(default=None, validation_alias=AliasChoices("TYPESAFE_API_KEY", "S1_TYPESAFE_API_KEY"))
 
     # -------------------------------------------------------------- routing
     default_threshold: float = 0.80

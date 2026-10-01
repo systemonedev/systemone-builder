@@ -148,7 +148,7 @@ docker compose exec api systemone s1-bench --engines local,jev,llm -n 50
 docker compose exec api systemone s1-bench --suite /data/my.jsonl --questions /data/questions.json
 ```
 
-Engines: `local` (this server's engine), `jev` (TypeSafe Jev, authenticated with `S1_API_KEY` for
-now), `llm` (the oracle writing JSON answers, the generative baseline). The built-in `phishing` suite
+Engines: `local` (this server's engine), `jev` (TypeSafe Jev, authenticated with
+`TYPESAFE_API_KEY`), `llm` (the oracle writing JSON answers, the generative baseline). The built-in `phishing` suite
 samples a balanced set from the public `zefang-liu/phishing-email-dataset` and caches it, so every
 run and engine sees the same emails. Full per-item results are saved to `eval_results/`.

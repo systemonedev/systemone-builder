@@ -74,7 +74,7 @@ class JevEngine(SystemOneEngine):
 
     async def answer(self, req: SystemOneRequest) -> SystemOneResponse:
         if not self._key:
-            raise EngineError("no TypeSafe API key: set S1_API_KEY to your TypeSafe key")
+            raise EngineError("no TypeSafe API key: set TYPESAFE_API_KEY in .env")
         body = {
             "state": req.state,
             "model": req.model or self.model,

@@ -139,8 +139,21 @@ async def test_jev_engine_sends_contract_and_parses():
     assert r.model == "jev-1.13.0" and r.latency_ms is not None
 
 
+def test_jev_key_comes_from_typesafe_api_key_not_s1_api_key(monkeypatch):
+    from systemone.config import Settings
+    from systemone.s1.factory import build_engine
+
+    monkeypatch.setenv("TYPESAFE_API_KEY", "apikey_typesafe")
+    monkeypatch.setenv("S1_API_KEY", "internal-lan-secret")
+    s = Settings(_env_file=None)
+    assert s.typesafe_api_key == "apikey_typesafe" and s.api_key == "internal-lan-secret"
+    assert build_engine("jev", s)._key == "apikey_typesafe"
+    monkeypatch.delenv("TYPESAFE_API_KEY")
+    assert build_engine("jev", Settings(_env_file=None))._key is None  # never falls back to S1_API_KEY
+
+
 async def test_jev_engine_requires_key():
-    with pytest.raises(EngineError, match="S1_API_KEY"):
+    with pytest.raises(EngineError, match="TYPESAFE_API_KEY"):
         await JevEngine(None).answer(SystemOneRequest(state="x", questions={"u": QUESTIONS["urgent"]}))
 
 

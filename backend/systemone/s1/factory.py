@@ -15,8 +15,8 @@ def build_engine(kind: str, s: Settings) -> SystemOneEngine:
         return LocalLogprobEngine(s.system_one_local_url or s.triage_url, s.system_one_local_model or s.triage_model,
                                   timeout_s=s.request_timeout_s, concurrency=s.system_one_concurrency)
     if kind == "jev":
-        # S1_API_KEY doubles as the TypeSafe key until it gets its own name.
-        return JevEngine(s.api_key, base_url=s.typesafe_url, model=s.typesafe_model, timeout_s=s.request_timeout_s)
+        return JevEngine(s.typesafe_api_key, base_url=s.typesafe_url, model=s.typesafe_model,
+                         timeout_s=s.request_timeout_s)
     if kind == "llm":
         o = resolve(s)["oracle"]
         return LLMJsonEngine(build_adapter(o.adapter, o.url, o.model, s.oracle_timeout_s, o.api_key()))
