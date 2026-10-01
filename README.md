@@ -121,7 +121,9 @@ python -m venv .venv && . .venv/bin/activate
 pip install -e "backend[dev]"
 redis-server --daemonize yes
 S1_TEST_REDIS_URL=redis://localhost:6379/15 pytest backend/tests
-cd frontend && NEXT_PUBLIC_S1_API_PORT=8000 npm run dev   # dashboard on :3000 against `systemone serve` on :8000
+cd frontend && npx next dev -p 3001 &    # Next.js dev server on a private port
+# dashboard on :3000 (via the gateway) against `systemone serve` on :8000
+S1_NEXT_URL=http://localhost:3001 S1_API_INTERNAL_URL=http://localhost:8000 PORT=3000 node gateway.mjs
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). Licensed under Apache-2.0.

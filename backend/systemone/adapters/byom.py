@@ -9,7 +9,7 @@ An optional ``systemone.yaml`` (path in ``S1_BYOM_FILE``) overrides them::
     triage:
       adapter: openai
       url: http://triage:8000/v1
-      model: Qwen/Qwen2.5-14B-Instruct-AWQ
+      model: Qwen/Qwen2.5-7B-Instruct
     oracle:
       adapter: ollama
       url: http://192.168.1.50:11434

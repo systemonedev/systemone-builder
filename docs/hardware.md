@@ -38,7 +38,10 @@ Reference: Windows 11, 192 GB RAM, `.wslconfig` `memory=160GB`, 2x RTX 3090.
    setting `S1_BIND_ADDR=0.0.0.0`; the API refuses a LAN bind without a real key.
 2. **Ports.** Everything is on 127.0.0.1 by default. API 8090 and dashboard 3090 follow
    `S1_BIND_ADDR`. Redis 6379 and the raw vLLM servers (8091/8092, no auth) are always
-   host-local. The dashboard is built to call `S1_API_PORT`, so rebuild it after changing that.
+   host-local. The browser only talks to the dashboard, whose gateway forwards `/api/v1` to the
+   API over the compose network and adds `S1_API_KEY` itself (the key never reaches the
+   browser). On loopback no sign-in is needed; on a LAN bind the dashboard asks for the key
+   once and keeps an HttpOnly session cookie.
 3. **GPU isolation.** The vLLM services use the same pattern as the mindoril stacks, which run
    stably on this machine: `device_ids`, `NVIDIA_VISIBLE_DEVICES` and `CUDA_VISIBLE_DEVICES` all
    set to the same index (student 0, triage 1; PCI bus order). Docker Desktop exposes every GPU

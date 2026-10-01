@@ -5,7 +5,7 @@ Three roles, each reached through an adapter:
 | Role | Default | Purpose |
 |---|---|---|
 | `student` | vLLM serving the fine-tuned `Qwen/Qwen2.5-1.5B-Instruct` | the System-1 reflex model |
-| `triage` | vLLM serving `Qwen/Qwen2.5-14B-Instruct-AWQ` | synchronous fallback on GPU 1 |
+| `triage` | vLLM serving `Qwen/Qwen2.5-7B-Instruct` | synchronous fallback on GPU 1 |
 | `oracle` | Ollama `qwen3.8:27b` on the Mac | System-2 teacher, judge, vision, deep analysis |
 
 ## Configure

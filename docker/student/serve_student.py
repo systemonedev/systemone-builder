@@ -252,7 +252,7 @@ def main() -> None:
         # but the fewest moving parts while a model loads under WSL2.
         print(f"[serve_{ROLE}] safe mode: --enforce-eager (unset S1_VLLM_SAFE_MODE to disable)", flush=True)
     if ROLE == "triage":
-        model = env("S1_TRIAGE_MODEL", "Qwen/Qwen2.5-14B-Instruct-AWQ")
+        model = env("S1_TRIAGE_MODEL", "Qwen/Qwen2.5-7B-Instruct")
         served, lora = model, None
         defaults = {"util": "0.90", "len": "16384", "offload": "16"}
     else:

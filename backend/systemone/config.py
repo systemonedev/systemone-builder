@@ -71,7 +71,7 @@ class Settings(BaseSettings):
     student_url: str = "http://localhost:8001/v1"
     student_served_name: str = "student"
     triage_url: str = "http://localhost:8002/v1"
-    triage_model: str = "Qwen/Qwen2.5-14B-Instruct-AWQ"
+    triage_model: str = "Qwen/Qwen2.5-7B-Instruct"
     oracle_url: str = "http://mac-m4.local:11434"
     oracle_model: str = "qwen3.8:27b"
     oracle_vision_model: str | None = None

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
-import { apiBase, apiKey, setApiKey } from "@/utils/api";
+import { authStatus, login, logout, type AuthStatus } from "@/utils/api";
 import { useEvents, usePoll } from "@/utils/hooks";
 import { notify } from "@/utils/notify";
 import { ActivityBanner, LiveIndicator, Toasts, type Activity } from "@/components/Activity";
@@ -45,6 +45,49 @@ function ThemeToggle() {
   );
 }
 
+/** Sign-in for a dashboard exposed beyond loopback. The key goes to the
+ *  dashboard's gateway once and is answered with an HttpOnly session cookie;
+ *  the browser never stores it. */
+function SignIn({ onSignedIn }: { onSignedIn: () => void }) {
+  const [key, setKey] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  return (
+    <form
+      className="space-y-1.5"
+      onSubmit={(e) => {
+        e.preventDefault();
+        setBusy(true);
+        setError(null);
+        login(key)
+          .then(() => {
+            setKey("");
+            onSignedIn();
+          })
+          .catch((err) => setError(err.message || "sign-in failed"))
+          .finally(() => setBusy(false));
+      }}
+    >
+      <input
+        type="password"
+        autoComplete="current-password"
+        placeholder="S1_API_KEY"
+        value={key}
+        onChange={(e) => setKey(e.target.value)}
+        className="w-full rounded border border-line bg-surface-2 px-2 py-1 text-xs text-ink"
+      />
+      <button
+        type="submit"
+        disabled={busy || !key}
+        className="w-full rounded border border-line bg-surface-2 px-2 py-1 text-xs text-ink disabled:opacity-50"
+      >
+        {busy ? "signing in…" : "sign in"}
+      </button>
+      {error && <div style={{ color: "var(--critical)" }}>{error}</div>}
+    </form>
+  );
+}
+
 export function Shell({ children }: { children: ReactNode }) {
   const path = usePathname();
   const health = usePoll<{ status: string; redis: boolean }>("/health", 5000);
@@ -65,10 +108,16 @@ export function Shell({ children }: { children: ReactNode }) {
     if (e.channel === "workflow" && e.type === "activated") notify(`Domain ${d.domain} activated`, "ok");
     if (["eval", "factory"].includes(e.channel)) activity.reload();
   });
-  const authError = [services.error, activity.error].find((x) => x && /401|API-Key/i.test(x));
-  const [key, setKey] = useState("");
+  const [auth, setAuth] = useState<AuthStatus | null>(null);
+  const refreshAuth = () => authStatus().then(setAuth, () => setAuth(null));
+  useEffect(() => {
+    refreshAuth();
+  }, []);
+  const signedOut = auth?.required && !auth.authenticated;
+  // A 401 while signed in (or with no sign-in needed) means the gateway's key
+  // does not match the API's: both read S1_API_KEY from .env.
+  const keyMismatch = !signedOut && [services.error, activity.error].some((x) => x && /401|API-Key/i.test(x));
   const [open, setOpen] = useState(false);
-  useEffect(() => setKey(apiKey() ?? ""), []);
   const ok = health.data?.status === "ok";
   return (
     <div className="flex min-h-screen flex-col md:flex-row">
@@ -98,20 +147,21 @@ export function Shell({ children }: { children: ReactNode }) {
         </nav>
         <div className={`${open ? "block" : "hidden"} space-y-2 border-t border-line px-4 py-3 text-xs text-ink-3 md:block`}>
           <ServiceList snap={ok ? services.data : null} apiUp={ok} />
-          <div className="truncate font-mono" title={apiBase()}>
-            {apiBase().replace(/^https?:\/\//, "")}
-          </div>
-          <input
-            type="password"
-            placeholder="X-API-Key"
-            value={key}
-            onChange={(e) => setKey(e.target.value)}
-            onBlur={() => {
-              setApiKey(key);
-              health.reload();
-            }}
-            className="w-full rounded border border-line bg-surface-2 px-2 py-1 text-xs text-ink"
-          />
+          {signedOut && (
+            <SignIn
+              onSignedIn={() => {
+                refreshAuth();
+                health.reload();
+                services.reload();
+                activity.reload();
+              }}
+            />
+          )}
+          {auth?.required && auth.authenticated && (
+            <button className="text-xs text-ink-3 underline hover:text-ink" onClick={() => logout().finally(refreshAuth)}>
+              sign out
+            </button>
+          )}
           <ThemeToggle />
         </div>
       </aside>
@@ -119,10 +169,16 @@ export function Shell({ children }: { children: ReactNode }) {
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <LiveIndicator live={live} pollSeconds={3} />
         </div>
-        {authError && (
+        {signedOut && (
           <div className="mb-4 rounded-lg border border-line bg-surface px-4 py-2.5 text-[13px] text-ink" role="alert">
-            <span style={{ color: "var(--critical)" }}>✕</span> The API requires an API key (S1_API_KEY in .env). Enter it
-            in the sidebar field X-API-Key.
+            <span style={{ color: "var(--warning)" }}>▲</span> This dashboard is reachable from the network, so it needs a
+            sign-in: enter the S1_API_KEY from .env in the sidebar.
+          </div>
+        )}
+        {keyMismatch && (
+          <div className="mb-4 rounded-lg border border-line bg-surface px-4 py-2.5 text-[13px] text-ink" role="alert">
+            <span style={{ color: "var(--critical)" }}>✕</span> The API rejected the dashboard&apos;s key. Both read
+            S1_API_KEY from .env; after changing it, recreate both: docker compose up -d api dashboard
           </div>
         )}
         {(services.data?.warnings ?? []).map((w) => (

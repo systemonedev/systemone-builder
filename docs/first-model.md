@@ -34,7 +34,7 @@ cp .env.example .env
 |---|---|
 | `S1_ORACLE_URL` | `http://<mac-ip>:11434` (a Tailscale IP works) |
 | `S1_REDIS_PASSWORD` | **required**: `openssl rand -hex 24` (compose won't start without it) |
-| `S1_API_KEY` | `openssl rand -hex 32`; enter the same value in the dashboard sidebar. Required before `S1_BIND_ADDR=0.0.0.0` |
+| `S1_API_KEY` | `openssl rand -hex 32`. The dashboard uses it server-side; you only type it in when the dashboard is exposed beyond loopback (it then asks you to sign in). Required before `S1_BIND_ADDR=0.0.0.0` |
 | `HF_TOKEN` | only needed for gated models (Llama, Gemma) |
 
 ### 0.3 WSL2 / Docker Desktop
@@ -224,7 +224,7 @@ To compare against the teachers, run the same benchmark with target **triage** a
 | `unrecognized arguments` from vLLM | Rebuild the launcher image (`docker compose build student`) and recreate the containers (`docker compose up -d --force-recreate student triage`). |
 | `GPU 0 VRAM not released: … MiB used` | Something outside systemone holds memory on GPU 0. On WSL2 that's usually the Windows desktop, browsers or other apps using that GPU; NVML counts them. The flush check passes once at least `S1_VRAM_REQUIRED_FREE_MB` (default 21000, what vLLM at 0.85 utilization needs to restart) is free and stable. Close GPU-heavy Windows apps, move your display to the other GPU, or lower `S1_GPU_MEMORY_UTILIZATION` together with `S1_VRAM_REQUIRED_FREE_MB`. |
 | GPU 0 still ~23 GB used after the student stops, or triage appears on the wrong GPU | Docker Desktop / WSL2 exposes every GPU to every container, so without pinning CUDA puts triage on GPU 0 too. The launcher and trainer now pin themselves (`S1_GPU_INDEX`). Rebuild (`docker compose build student`) and recreate student and triage. `systemone doctor` and the dashboard warn if a service's GPU looks idle. |
-| "Live updates off - API key missing or wrong" | The API has `S1_API_KEY` set (`.env.example` ships `change-me`). Enter the same value in the sidebar's X-API-Key field, or remove it from `.env`. |
+| "The API rejected the dashboard's key" | api and dashboard read `S1_API_KEY` from `.env` when they are created. After changing it, recreate both: `docker compose up -d api dashboard`. |
 | `EngineDeadError` / `engine manager stopped` in the student log when training starts | Expected: the lifecycle stops vLLM to free GPU 0, and vLLM logs its shutdown as errors. |
 | Training cycle rolled back | See the run's error on *Factory & Training*. `docker compose logs api` has the full trace. If a reload times out, increase `S1_STUDENT_START_TIMEOUT_S`. |
 | Oracle shows `degraded` | Run `ollama pull <model>` on the Mac. |

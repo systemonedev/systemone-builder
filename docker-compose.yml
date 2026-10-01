@@ -107,12 +107,21 @@ services:
     build:
       context: .
       dockerfile: docker/dashboard/Dockerfile
-      args:
-        # empty = same host as the dashboard, on NEXT_PUBLIC_S1_API_PORT
-        NEXT_PUBLIC_S1_API_URL: ${S1_PUBLIC_API_URL:-}
-        NEXT_PUBLIC_S1_API_PORT: ${S1_API_PORT:-8090}
     image: systemone/dashboard:latest
     container_name: systemone-dashboard
+    # The browser only talks to the dashboard. Its gateway (frontend/gateway.mjs)
+    # forwards /api/v1 to the API over the compose network and adds S1_API_KEY
+    # itself, so the key never reaches the browser. Only same-origin requests
+    # are forwarded. On loopback (the default) no sign-in is needed; on any
+    # other S1_BIND_ADDR the dashboard asks for S1_API_KEY once and keeps an
+    # HttpOnly session cookie. Only these variables are passed, not all of .env.
+    environment:
+      S1_API_KEY: ${S1_API_KEY:-}
+      S1_API_INTERNAL_URL: http://api:8000
+      S1_BIND_ADDR: ${S1_BIND_ADDR:-127.0.0.1}
+      # extra host names the dashboard may be opened by on loopback, comma-separated
+      S1_DASHBOARD_ALLOWED_HOSTS: ${S1_DASHBOARD_ALLOWED_HOSTS:-}
+      S1_PUBLIC_HOST: ${S1_PUBLIC_HOST:-}
     ports:
       - "${S1_BIND_ADDR:-127.0.0.1}:${S1_DASHBOARD_PORT:-3090}:3000"
     mem_limit: ${S1_DASHBOARD_MEM_LIMIT:-1g}
@@ -189,7 +198,7 @@ services:
       CUDA_VISIBLE_DEVICES: ${S1_TRIAGE_CUDA_DEVICE:-${S1_TRIAGE_GPU:-1}}
       S1_GPU_INDEX: ${S1_TRIAGE_GPU:-1}
       CUDA_DEVICE_ORDER: PCI_BUS_ID
-      S1_TRIAGE_MODEL: ${S1_TRIAGE_MODEL:-Qwen/Qwen2.5-14B-Instruct-AWQ}
+      S1_TRIAGE_MODEL: ${S1_TRIAGE_MODEL:-Qwen/Qwen2.5-7B-Instruct}
       S1_GPU_MEMORY_UTILIZATION: ${S1_TRIAGE_GPU_MEMORY_UTILIZATION:-0.90}
       S1_MAX_MODEL_LEN: ${S1_TRIAGE_MAX_MODEL_LEN:-16384}
       S1_KV_OFFLOAD_GB: ${S1_TRIAGE_KV_OFFLOAD_GB:-}
