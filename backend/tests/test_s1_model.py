@@ -82,3 +82,75 @@ def test_engine_factory_targets_local_model_server():
     assert str(e.client.base_url) == "http://s1:8000" and e._require_key is False
     assert api_engine(s).name.startswith("s1")
     assert api_engine(Settings(_env_file=None, system_one_backend="logprob")).name.startswith("local")
+
+
+# ------------------------------------------------------------ multi-task data
+def _ctx(seed=0):
+    from systemone.s1model.multitask import Ctx
+
+    return Ctx(random.Random(seed), {
+        "label": ["negative", "positive"],
+        "intent": ["oos", "transfer_money", "check_balance", "book_flight", "weather", "timer", "alarm", "translate",
+                   "recipe", "calories", "pay_bill", "credit_score", "order_status", "lost_card", "pin_change", "spelling"],
+    })
+
+
+SAMPLES = {
+    "amazon": {"label": 1, "title": "Great", "content": "Loved it, works perfectly."},
+    "clinc": {"intent": 1, "text": "send 20 dollars to mom"},
+    "boolq": {"question": "is the sky blue", "passage": "The sky appears blue due to Rayleigh scattering.", "answer": True},
+    "nli": {"premise": "A man is playing a guitar on stage.", "hypothesis": "A person is performing music.", "label": 0},
+    "civil": {"text": "You are an idiot.", "toxicity": 0.9, "severe_toxicity": 0.3, "insult": 0.85, "threat": 0.0, "obscene": 0.1},
+}
+
+
+@pytest.mark.parametrize("key", list(SAMPLES))
+def test_multitask_rows_fit_the_contract_and_trainer(key):
+    from systemone.s1model.multitask import SOURCES
+
+    for seed in range(40):  # every random branch of the maker
+        row = SOURCES[key].make(dict(SAMPLES[key]), _ctx(seed))
+        if row is None:
+            continue
+        for qid, qd in row["questions"].items():
+            qq = Question.model_validate(qd)
+            _, options = hypotheses(qq)
+            vec = target_vector(qq, options, row["targets"][qid])
+            assert sum(vec) == pytest.approx(1.0)
+
+
+def test_multitask_class_questions_are_balanced_and_genre_questions_mostly_no():
+    from systemone.s1model.multitask import make_clinc, make_dbpedia
+
+    from systemone.s1model.multitask import Ctx
+
+    ctx = Ctx(random.Random(3), {"label": ["Company", "Artist", "Athlete", "Village", "Album", "Film", "Plant", "Animal",
+                                           "Building", "NaturalPlace", "WrittenWork", "Politician", "School", "Vehicle"]})
+    nouls, genre = [], []
+    for _ in range(600):
+        row = make_dbpedia({"label": 1, "title": "X", "content": "An artist."}, ctx)
+        if row["questions"]["q_topic"]["type"] == "noul":
+            nouls.append(row["targets"]["q_topic"])
+        if "q_genre" in row["targets"]:
+            genre.append(row["targets"]["q_genre"])
+    assert 0.4 < sum(nouls) / len(nouls) < 0.6
+    assert 0.2 < sum(genre) / len(genre) < 0.5  # most genre questions are about another genre
+    other_bucket = 0
+    for seed in range(200):
+        row = make_clinc(dict(SAMPLES["clinc"]), _ctx(seed))
+        q = row["questions"]["q_intent"]
+        if q["type"] == "choice":
+            assert row["targets"]["q_intent"] in q["criteria"]
+            other_bucket += row["targets"]["q_intent"] in ("other", "none of these", "something else")
+    assert other_bucket > 0
+
+
+def test_civil_noul_targets_are_soft():
+    from systemone.s1model.multitask import make_civil
+
+    seen = set()
+    for seed in range(60):
+        row = make_civil(dict(SAMPLES["civil"]), _ctx(seed))
+        if row["questions"]["q_tox"]["type"] == "noul":
+            seen.add(row["targets"]["q_tox"])
+    assert seen & {0.9, 0.85, 0.1}  # annotator fractions, not 0/1

@@ -68,11 +68,31 @@ PHISHING_QUESTIONS = {
 }
 
 
+async def hf_get(client: httpx.AsyncClient, path: str, params: dict[str, Any], tries: int = 6) -> dict[str, Any]:
+    """GET from the Hugging Face datasets-server, retrying rate limits and hiccups.
+
+    The server answers 429 (or an empty / non-JSON body) when hit hard; back off
+    and retry instead of failing a whole benchmark or dataset build.
+    """
+    delay = 2.0
+    for attempt in range(tries):
+        try:
+            r = await client.get(f"{HF_ROWS}{path}", params=params)
+            if r.status_code == 200:
+                return r.json()
+            if r.status_code not in (429, 500, 502, 503, 504):
+                r.raise_for_status()
+        except (httpx.TransportError, ValueError):
+            if attempt == tries - 1:
+                raise
+        await asyncio.sleep(delay)
+        delay = min(delay * 2, 60)
+    raise RuntimeError(f"datasets-server kept failing for {path} {params}")
+
+
 async def _hf_rows(client: httpx.AsyncClient, offset: int, length: int = 100) -> tuple[list[dict[str, Any]], int]:
-    r = await client.get(f"{HF_ROWS}/rows", params={"dataset": PHISHING_DATASET, "config": "default", "split": "train",
-                                                  "offset": offset, "length": length})
-    r.raise_for_status()
-    data = r.json()
+    data = await hf_get(client, "/rows", {"dataset": PHISHING_DATASET, "config": "default", "split": "train",
+                                          "offset": offset, "length": length})
     return [x["row"] for x in data.get("rows", [])], int(data.get("num_rows_total") or 0)
 
 
@@ -122,6 +142,67 @@ async def phishing_suite(n: int, seed: int, cache_dir: Path | None) -> Suite:
                  gate="is_malicious")
 
 
+OOD_QUESTIONS = {
+    "spam": Question(type="noul", instructions="Is this message spam?"),
+    "emotion": Question(type="choice", instructions="Which emotion does the writer express?",
+                        criteria={"sadness": None, "joy": None, "love": None, "anger": None, "fear": None, "surprise": None}),
+    "news_topic": Question(type="choice", instructions="What is this news story about?",
+                           criteria={"World": "International news, politics, conflicts", "Sports": None,
+                                     "Business": "Companies, markets, the economy", "Sci/Tech": "Science and technology"}),
+}
+# (dataset, config, split, text field, label field, question id, state key)
+OOD_TASKS = [
+    ("ucirvine/sms_spam", "plain_text", "train", "sms", "label", "spam", "message"),
+    ("dair-ai/emotion", "split", "test", "text", "label", "emotion", "post"),
+    ("fancyzhx/ag_news", "default", "test", "text", "label", "news_topic", "story"),
+]
+
+
+async def fetch_ood(n_per_task: int, seed: int) -> list[Item]:
+    """Labelled items from tasks the System One model is never trained on."""
+    rng = random.Random(seed)
+    items: list[Item] = []
+    async with httpx.AsyncClient(timeout=60) as client:
+        for dataset, config, split, text_f, label_f, qid, key in OOD_TASKS:
+            info = await hf_get(client, "/info", {"dataset": dataset, "config": config})
+            names = info["dataset_info"]["features"][label_f]["names"]
+            first = await hf_get(client, "/rows", {"dataset": dataset, "config": config, "split": split,
+                                                   "offset": 0, "length": 1})
+            pages = list(range(0, max(int(first["num_rows_total"]) - 100, 1), 100))
+            rng.shuffle(pages)
+            per_class = max(1, n_per_task // len(names))
+            got: dict[int, list[str]] = {i: [] for i in range(len(names))}
+            for offset in pages:
+                if all(len(v) >= per_class for v in got.values()):
+                    break
+                rows = (await hf_get(client, "/rows", {"dataset": dataset, "config": config, "split": split,
+                                                        "offset": offset, "length": 100})).get("rows", [])
+                for x in rows:
+                    lab, text = x["row"][label_f], (x["row"].get(text_f) or "").strip()
+                    if text and len(got[lab]) < per_class:
+                        got[lab].append(text[:1500])
+            for lab, texts in got.items():
+                for text in texts:
+                    truth: Any = int(names[lab] == "spam") if qid == "spam" else names[lab]
+                    items.append(Item(id=f"{qid}-{len(items)}", state={key: text}, labels={qid: truth}))
+    rng.shuffle(items)
+    return items
+
+
+async def ood_suite(n_per_task: int, seed: int, cache_dir: Path | None) -> Suite:
+    cache = cache_dir / f"ood-n{n_per_task}-seed{seed}.json" if cache_dir else None
+    if cache and cache.exists():
+        items = [Item(**x) for x in json.loads(cache.read_text())]
+    else:
+        items = await fetch_ood(n_per_task, seed)
+        if cache:
+            cache.parent.mkdir(parents=True, exist_ok=True)
+            cache.write_text(json.dumps([x.__dict__ for x in items]))
+    desc = ", ".join(t[0] for t in OOD_TASKS)
+    return Suite("ood", f"out-of-domain tasks never trained on ({desc}), ~{n_per_task} each, seed {seed}",
+                 OOD_QUESTIONS, items, gate="spam")
+
+
 def jsonl_suite(path: Path, questions_path: Path, gate: str | None = None) -> Suite:
     questions = {k: Question.model_validate(v) for k, v in json.loads(questions_path.read_text()).items()}
     items = []
@@ -139,7 +220,9 @@ async def run_engine(engine: SystemOneEngine, suite: Suite, concurrency: int) ->
     sem = asyncio.Semaphore(concurrency)
 
     async def one(item: Item) -> dict[str, Any]:
-        req = SystemOneRequest(state=item.state, questions=suite.questions)
+        # mixed suites: each item is asked only the questions it has labels for
+        qs = {k: suite.questions[k] for k in item.labels if k in suite.questions} or suite.questions
+        req = SystemOneRequest(state=item.state, questions=qs)
         async with sem:
             t0 = time.perf_counter()
             try:
@@ -205,6 +288,7 @@ def question_metrics(qid: str, q: Question, suite: Suite, results: list[dict[str
                    brier=statistics.fmean((p - y) ** 2 for p, y in pairs),
                    ece=ece(ps, [float(y) for y in ys]))
         if qid == suite.gate:
+            asked = sum(1 for it in suite.items if it.labels.get(qid) is not None)
             auto_pos = [y for p, y in pairs if p >= hi]
             auto_neg = [y for p, y in pairs if p <= lo]
             fp, fn = auto_pos.count(0), auto_neg.count(1)
@@ -212,8 +296,8 @@ def question_metrics(qid: str, q: Question, suite: Suite, results: list[dict[str
             out["gate"] = {
                 "hi": hi, "lo": lo,
                 "auto_positive": len(auto_pos), "auto_negative": len(auto_neg),
-                "to_human": len(suite.items) - automated,
-                "automation_rate": automated / len(suite.items),
+                "to_human": asked - automated,
+                "automation_rate": automated / asked if asked else None,
                 "false_positives_acted": fp, "false_negatives_closed": fn,
                 "automated_accuracy": (automated - fp - fn) / automated if automated else None,
             }

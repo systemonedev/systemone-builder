@@ -55,7 +55,7 @@ def cmd_s1_bench(a: argparse.Namespace) -> int:
     from pathlib import Path
 
     from systemone.config import get_settings
-    from systemone.s1.bench import format_reports, jsonl_suite, phishing_suite, run_benchmark
+    from systemone.s1.bench import format_reports, jsonl_suite, ood_suite, phishing_suite, run_benchmark
     from systemone.s1.factory import build_engine
 
     s = get_settings()
@@ -63,6 +63,8 @@ def cmd_s1_bench(a: argparse.Namespace) -> int:
     async def go() -> int:
         if a.suite == "phishing":
             suite = await phishing_suite(a.n, a.seed, s.data_dir / "s1_bench_cache")
+        elif a.suite == "ood":
+            suite = await ood_suite(a.n, a.seed, s.data_dir / "s1_bench_cache")
         else:
             if not a.questions:
                 print("a JSONL suite needs --questions questions.json", file=sys.stderr)
@@ -86,22 +88,37 @@ def cmd_s1_bench(a: argparse.Namespace) -> int:
 
 
 def cmd_s1_data(a: argparse.Namespace) -> int:
-    """Write System One training rows (JSONL) for the built-in phishing task."""
+    """Write System One training rows (JSONL): the phishing task or the multi-task mix."""
     from pathlib import Path
 
     from systemone.config import get_settings
     from systemone.s1.bench import phishing_suite
     from systemone.s1model.data import phishing_training_rows
+    from systemone.s1model.multitask import multitask_rows
 
     s = get_settings()
     cache = s.data_dir / "s1_bench_cache"
+    datasets = Path("/data/workspace/s1/datasets") if Path("/data/workspace").exists() else s.data_dir / "s1_datasets"
+    out = Path(a.out or datasets / f"{a.task}-train.jsonl")
 
     async def go() -> int:
         await phishing_suite(a.bench_n, a.bench_seed, cache)  # make sure the benchmark set exists to exclude it
-        rows = await phishing_training_rows(a.n, a.seed, cache)
-        out = Path(a.out)
+        if a.task == "phishing":
+            rows = await phishing_training_rows(a.n, a.seed, cache)
+            manifest = None
+        else:
+            phishing_file = out.parent / "phishing-train.jsonl"
+            if not phishing_file.exists():
+                phishing_file.parent.mkdir(parents=True, exist_ok=True)
+                prow = await phishing_training_rows(4000, 7, cache)
+                phishing_file.write_text("".join(json.dumps(r) + "\n" for r in prow))
+            rows, manifest = await multitask_rows(a.per_source, a.seed, phishing_file, a.phishing_rows,
+                                                  a.sources.split(",") if a.sources else None)
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text("".join(json.dumps(r) + "\n" for r in rows))
+        if manifest:
+            out.with_suffix(".manifest.json").write_text(json.dumps(manifest, indent=1))
+            print(f"mean noul target (share of 'yes'): {manifest['noul_mean_target']}")
         print(f"wrote {len(rows)} rows to {out}")
         return 0
 
@@ -222,7 +239,8 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("templates", help="list starter templates").set_defaults(fn=cmd_templates)
     sub.add_parser("doctor", help="check hardware, Docker, Redis and model endpoints").set_defaults(fn=cmd_doctor)
     b = sub.add_parser("s1-bench", help="benchmark System One engines (local / Jev / LLM) on a labelled suite")
-    b.add_argument("--suite", default="phishing", help="'phishing' (built in) or a JSONL file of {id, state, labels}")
+    b.add_argument("--suite", default="phishing",
+                   help="'phishing', 'ood' (tasks never trained on; -n per task) or a JSONL file of {id, state, labels}")
     b.add_argument("--questions", help="questions JSON for a JSONL suite ({qid: {type, instructions, criteria}})")
     b.add_argument("--gate", help="noul question used for automation metrics (default: first noul)")
     b.add_argument("--engines", default="s1,jev,local", help="comma-separated: s1, jev, local, llm (slow)")
@@ -234,9 +252,13 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--repeat-check", type=int, default=10, help="items asked twice to check determinism (0 = off)")
     b.add_argument("--out", help="directory for the JSON results (default: <data_dir>/eval_results)")
     b.set_defaults(fn=cmd_s1_bench)
-    d = sub.add_parser("s1-data", help="write System One training rows for the phishing task (benchmark emails excluded)")
-    d.add_argument("--out", default="/data/workspace/s1/datasets/phishing-train.jsonl")
-    d.add_argument("-n", type=int, default=4000)
+    d = sub.add_parser("s1-data", help="write System One training rows (benchmark items are always excluded)")
+    d.add_argument("--task", choices=["phishing", "multitask"], default="multitask")
+    d.add_argument("--out", help="JSONL path (default: <workspace>/s1/datasets/<task>-train.jsonl)")
+    d.add_argument("-n", type=int, default=4000, help="phishing rows (--task phishing)")
+    d.add_argument("--per-source", type=int, default=1200, help="rows per public dataset (--task multitask)")
+    d.add_argument("--phishing-rows", type=int, default=1500, help="phishing rows mixed in (--task multitask)")
+    d.add_argument("--sources", help="comma-separated subset of: amazon, dbpedia, clinc, boolq, nli, civil")
     d.add_argument("--seed", type=int, default=7)
     d.add_argument("--bench-n", type=int, default=50, help="benchmark suite size to exclude (as used by s1-bench)")
     d.add_argument("--bench-seed", type=int, default=42)
