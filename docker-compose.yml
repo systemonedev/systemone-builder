@@ -145,7 +145,8 @@ services:
       # empty = launcher default (32 GB on Linux, 0 on WSL2 where large pinned
       # regions have taken the whole VM down)
       S1_KV_OFFLOAD_GB: ${S1_KV_OFFLOAD_GB:-}
-      # empty = auto (off for the student); 1 = V1 runner, no pinned memory, --enforce-eager
+      # empty = auto (off for the student); 1 = --enforce-eager. Under WSL2 pinned
+      # memory is always off and the V1 runner is used, safe mode or not.
       S1_VLLM_SAFE_MODE: ${S1_STUDENT_SAFE_MODE:-}
       HF_HOME: /workspace/hf_cache
       VLLM_CACHE_ROOT: /workspace/vllm_cache
@@ -189,7 +190,7 @@ services:
       S1_MAX_MODEL_LEN: ${S1_TRIAGE_MAX_MODEL_LEN:-16384}
       S1_KV_OFFLOAD_GB: ${S1_TRIAGE_KV_OFFLOAD_GB:-}
       S1_VLLM_EXTRA_ARGS: ${S1_TRIAGE_VLLM_EXTRA_ARGS:-}
-      # empty = auto (on under WSL2): V1 runner, no pinned memory, --enforce-eager
+      # empty = auto (on under WSL2): --enforce-eager
       S1_VLLM_SAFE_MODE: ${S1_TRIAGE_SAFE_MODE:-}
       HF_HOME: /workspace/hf_cache
       VLLM_CACHE_ROOT: /workspace/vllm_cache

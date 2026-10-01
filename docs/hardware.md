@@ -53,10 +53,10 @@ Reference: Windows 11, 192 GB RAM, `.wslconfig` `memory=160GB`, 2x RTX 3090.
    default on WSL2**. Raise `S1_KV_OFFLOAD_GB` / `S1_TRIAGE_KV_OFFLOAD_GB` gradually while
    watching `docker stats` and `vmmemWSL` in Task Manager. The offload regions live in the
    shared `/dev/shm` (`ipc: host`) and may not count against a container's `mem_limit`.
-6. **WSL2 safe mode for triage.** Under WSL2 the triage server starts by default with
-   vLLM's V1 model runner, no pinned host memory and `--enforce-eager` (no torch.compile /
-   CUDA-graph capture): the paths most likely to take the VM down while a large model loads.
-   The log line `WSL2 safe mode: …` confirms it. Controls: `S1_TRIAGE_SAFE_MODE` /
+6. **WSL2: no pinned memory, V1 runner, safe mode for triage.** Under WSL2 both vLLM
+   servers run without pinned host memory and with the V1 model runner (see "Pinned memory
+   stays off" below). Triage also defaults to `--enforce-eager` (no torch.compile /
+   CUDA-graph capture). The log lines `pinned memory off` and `WSL2 safe mode: …` confirm it. Controls: `S1_TRIAGE_SAFE_MODE` /
    `S1_STUDENT_SAFE_MODE` (`1` on, `0` off, unset = auto). The API waits for triage to
    *start*, not to be healthy, so a failing triage no longer keeps the dashboard down.
 7. **Bring-up order:**
@@ -71,7 +71,7 @@ Reference: Windows 11, 192 GB RAM, `.wslconfig` `memory=160GB`, 2x RTX 3090.
    Then walk the triage settings down one step at a time, recreating only triage each time:
    | Step | `.env` | What it rules out |
    |---|---|---|
-   | a | defaults (safe mode on) | torch.compile, CUDA graphs, pinned memory |
+   | a | defaults (safe mode on, pinned memory off) | torch.compile, CUDA graphs, pinned memory |
    | b | `S1_TRIAGE_MAX_MODEL_LEN=8192`, `S1_TRIAGE_GPU_MEMORY_UTILIZATION=0.80` | KV-cache allocation size |
    | c | `S1_TRIAGE_MODEL=Qwen/Qwen2.5-7B-Instruct-AWQ` | model size |
    | d | `S1_TRIAGE_MODEL=Qwen/Qwen2.5-7B-Instruct` (unquantized) | the AWQ / Marlin kernel path |
@@ -81,10 +81,20 @@ Reference: Windows 11, 192 GB RAM, `.wslconfig` `memory=160GB`, 2x RTX 3090.
 
 ## WSL2 / Docker Desktop hosts
 
-vLLM disables pinned host memory under WSL2 by default, and its V2 model runner then fails
-with `RuntimeError: UVA is not available`. The launcher detects a WSL2 kernel and sets
-`VLLM_WSL2_ENABLE_PIN_MEMORY=1`. This needs WSL2 kernel ≥ 4.19.121; run `wsl --update` if
-yours is older, or set the variable to `0` in `.env` to opt out.
+**Pinned memory stays off.** vLLM disables pinned host memory under WSL2 on purpose (NVIDIA
+lists it as a CUDA-on-WSL limitation). Forcing it on (`VLLM_WSL2_ENABLE_PIN_MEMORY=1`) is
+what crashed this stack: from the day the launcher started forcing it, the WSL2 VM was killed
+from the Windows side while engines loaded. No Linux OOM or panic was logged, there were
+`dxgvmb_send_sync_msg` failures in the VM kernel log, and Windows itself hard-crashed once.
+Under WSL2 the launcher now sets `VLLM_WSL2_ENABLE_PIN_MEMORY=0` and
+`VLLM_USE_V2_MODEL_RUNNER=0` (the V2 runner needs pinned/UVA buffers and fails with
+`RuntimeError: UVA is not available` without them). Both can be overridden in `.env`, but
+don't, unless you're experimenting on purpose.
+
+**Triage GPU is the display GPU.** On this machine GPU 1 (PCI bus 02) drives the monitors,
+so the Windows desktop, browsers and any game share its VRAM with triage. WDDM lets that
+VRAM be oversubscribed instead of failing allocations cleanly. Don't game while triage is
+running, and lower `S1_TRIAGE_GPU_MEMORY_UTILIZATION` (e.g. 0.80) if the desktop needs more.
 
 **Storage.** Keep the workspace (model cache, runs, datasets) in the default Docker named
 volume `systemone-workspace`. A bind mount of a Windows folder (`/mnt/c/...`) goes through

@@ -238,23 +238,24 @@ def main() -> None:
     for var in ("VLLM_WSL2_ENABLE_PIN_MEMORY", "VLLM_USE_V2_MODEL_RUNNER"):
         if os.environ.get(var) == "":
             del os.environ[var]
+    if in_wsl():
+        # Never pin host memory on WSL2. vLLM turns it off there on purpose
+        # (NVIDIA's CUDA-on-WSL known limitations); forcing it on routes large
+        # page-locked buffers through the dxg GPU-paravirtualization channel,
+        # and that is what killed the whole WSL2 VM (and once Windows) here.
+        # The V1 model runner needs no pinned/UVA buffers, so use it instead
+        # of the V2 runner ("RuntimeError: UVA is not available").
+        # Override either variable in .env only to experiment.
+        os.environ.setdefault("VLLM_WSL2_ENABLE_PIN_MEMORY", "0")
+        os.environ.setdefault("VLLM_USE_V2_MODEL_RUNNER", "0")
+        print(f"[serve_{ROLE}] WSL2 kernel detected ({platform.release()}): pinned memory "
+              f"{'ON (overridden in env)' if os.environ['VLLM_WSL2_ENABLE_PIN_MEMORY'] == '1' else 'off'}, "
+              f"V2 model runner {'on' if os.environ['VLLM_USE_V2_MODEL_RUNNER'] == '1' else 'off'}", flush=True)
     safe = wsl_safe_mode()
     if safe:
-        # Conservative WSL2 profile: the V1 model runner (needs no pinned/UVA
-        # buffers), no pinned host memory, and no torch.compile / CUDA-graph
-        # capture. Slower per token, but avoids the paths that have taken
-        # the whole WSL2 VM down while a model was loading.
-        os.environ.setdefault("VLLM_USE_V2_MODEL_RUNNER", "0")
-        os.environ.setdefault("VLLM_WSL2_ENABLE_PIN_MEMORY", "0")
-        print(f"[serve_{ROLE}] WSL2 safe mode: V1 model runner, no pinned memory, --enforce-eager "
-              f"(S1_VLLM_SAFE_MODE=0 to disable)", flush=True)
-    elif in_wsl() and "VLLM_WSL2_ENABLE_PIN_MEMORY" not in os.environ:
-        # vLLM disables pinned memory under WSL2 by default, and its V2 model
-        # runner cannot start without it ("RuntimeError: UVA is not available").
-        # WSL2 kernels >= 4.19.121 support pinned memory; set
-        # VLLM_WSL2_ENABLE_PIN_MEMORY=0 explicitly to opt out.
-        os.environ["VLLM_WSL2_ENABLE_PIN_MEMORY"] = "1"
-        print(f"[serve_{ROLE}] WSL2 kernel detected ({platform.release()}): enabling VLLM_WSL2_ENABLE_PIN_MEMORY=1", flush=True)
+        # No torch.compile / CUDA-graph capture at startup: slower per token,
+        # but the fewest moving parts while a model loads under WSL2.
+        print(f"[serve_{ROLE}] WSL2 safe mode: --enforce-eager (S1_VLLM_SAFE_MODE=0 to disable)", flush=True)
     if ROLE == "triage":
         model = env("S1_TRIAGE_MODEL", "Qwen/Qwen2.5-14B-Instruct-AWQ")
         served, lora = model, None
