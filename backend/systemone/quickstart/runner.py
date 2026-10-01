@@ -110,7 +110,10 @@ def run(api: str, api_key: str | None = None, n_train: int = 600, n_heldout: int
             m = c.get(f"/training/runs/{run_id}/metrics")
             if m and m[-1].get("step", -1) != last_step:
                 last_step = m[-1]["step"]
-                say(f"step {last_step}/{m[-1].get('max_steps')} loss {m[-1].get('loss', float('nan')):.4f}")
+                # The trainer's end-of-run summary has train_loss, not loss: show
+                # the latest per-step loss instead of printing nan.
+                loss = next((x["loss"] for x in reversed(m) if isinstance(x.get("loss"), (int, float))), None)
+                say(f"step {last_step}/{m[-1].get('max_steps')}" + (f" loss {loss:.4f}" if loss is not None else ""))
             run_rec = next((r for r in c.get("/training/runs") if r["run_id"] == run_id), None)
             if run_rec and run_rec["status"] in ("succeeded", "failed"):
                 break

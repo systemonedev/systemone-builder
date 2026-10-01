@@ -296,7 +296,11 @@ class StudentLifecycleOrchestrator:
                 result_payload.update(m)
             elif m.get("kind") == "error":
                 error_payload.update(m)
-            self.bus.publish("training", m.get("kind", "log"), run_id=cfg["run_id"], **{k: v for k, v in m.items() if k != "kind"})
+            # The trainer's own messages may already carry run_id: merge, don't
+            # pass it twice.
+            data = {k: v for k, v in m.items() if k != "kind"}
+            data["run_id"] = cfg["run_id"]
+            self.bus.publish("training", m.get("kind", "log"), **data)
             if m.get("kind") == "log":
                 pending.append(asyncio.ensure_future(self.store.push(metrics_key, m)))
 

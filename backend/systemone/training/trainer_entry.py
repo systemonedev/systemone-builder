@@ -107,8 +107,12 @@ def main(config_path: str) -> int:
     class MetricCallback(TrainerCallback):
         def on_log(self, args, state, control, logs=None, **kwargs):  # noqa: D401
             if logs:
-                emit("log", step=state.global_step, max_steps=state.max_steps, epoch=state.epoch,
-                     **{k: v for k, v in logs.items() if isinstance(v, (int, float))})
+                # transformers' logs already carry "epoch" (and may carry others):
+                # merge into one dict so the trainer state's values win, instead
+                # of passing the same keyword twice.
+                data = {k: v for k, v in logs.items() if isinstance(v, (int, float))}
+                data.update(step=state.global_step, max_steps=state.max_steps, epoch=state.epoch)
+                emit("log", **data)
 
         def on_train_begin(self, args, state, control, **kwargs):
             emit("status", phase="training", max_steps=state.max_steps)
