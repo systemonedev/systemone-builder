@@ -85,6 +85,17 @@ class Settings(BaseSettings):
     request_timeout_s: float = 30.0
     oracle_timeout_s: float = 600.0
 
+    # ------------------------------------------- System One (Jev-compatible)
+    # Local engine for POST /api/v1/systemone: reads each answer from one
+    # forward pass of an OpenAI-compatible model. Unset = the triage server.
+    system_one_local_url: str | None = None
+    system_one_local_model: str | None = None
+    system_one_concurrency: int = 16
+    # TypeSafe Jev, the reference System One model we benchmark against.
+    # Authenticated with S1_API_KEY for now (to be renamed to a TypeSafe key).
+    typesafe_url: str = "https://api.typesafe.ai"
+    typesafe_model: str = "jev-latest"
+
     # -------------------------------------------------------------- routing
     default_threshold: float = 0.80
     oracle_concurrency: int = 1

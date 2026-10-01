@@ -110,3 +110,45 @@ Channels: `routing`, `telemetry`, `lifecycle`, `training`, `factory`, `dpo`, `ev
 | POST | `/byom/validate` | Validate |
 | GET | `/templates` | Templates |
 | POST | `/templates/{template_id}/install` | Install |
+
+## system-one
+
+The [Jev](https://docs.typesafe.ai) System One contract, served by the local engine: a client can
+switch between TypeSafe Jev and this server by changing only the base URL and key.
+
+| Method | Path | Description |
+|---|---|---|
+| POST | `/systemone` | `{state, questions}` → `{model, answers, usage}`, Jev's wire format |
+
+```bash
+curl -s http://localhost:8090/api/v1/systemone -H "X-API-Key: $S1_API_KEY" -H 'Content-Type: application/json' -d '{
+  "state": {"email": {"subject": "Are you at your desk?", "body": "I need a wire transfer sent out immediately."}},
+  "questions": {
+    "is_malicious": {"type": "noul", "instructions": "Is this email a phishing attempt or threat?"},
+    "category": {"type": "choice", "instructions": "What type of email is this?",
+                 "criteria": {"Safe": null, "BEC": null, "Credential_Harvesting": null, "Spam": null}},
+    "severity": {"type": "score", "instructions": "How severe would it be?",
+                 "criteria": ["None", "Low", "Medium", "High", "Critical"]}}}'
+```
+
+Question types: `noul` (`criteria` optional), `choice` (`criteria` maps 2–255 option names to a
+description or `null`; the local engine reads up to 20), `score` (`criteria` is an ordered list of
+2–10 levels). Each answer is read from one forward pass of the local model (`S1_SYSTEM_ONE_LOCAL_URL` /
+`S1_SYSTEM_ONE_LOCAL_MODEL`, default: the triage server); `confidence` is `(max p − 1/n)/(1 − 1/n)`, the
+formula Jev's published examples follow. The response adds `latency_ms`, which Jev does not send.
+
+### Benchmark: `systemone s1-bench`
+
+Runs the same questions over the same labelled items on each engine and reports accuracy,
+calibration (Brier, ECE), gating (automation rate, false positives acted on, false negatives
+auto-closed at `--hi`/`--lo`), latency, errors, and determinism (items asked twice).
+
+```bash
+docker compose exec api systemone s1-bench --engines local,jev,llm -n 50
+docker compose exec api systemone s1-bench --suite /data/my.jsonl --questions /data/questions.json
+```
+
+Engines: `local` (this server's engine), `jev` (TypeSafe Jev, authenticated with `S1_API_KEY` for
+now), `llm` (the oracle writing JSON answers, the generative baseline). The built-in `phishing` suite
+samples a balanced set from the public `zefang-liu/phishing-email-dataset` and caches it, so every
+run and engine sees the same emails. Full per-item results are saved to `eval_results/`.

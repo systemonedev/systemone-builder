@@ -49,6 +49,42 @@ def cmd_templates(_: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_s1_bench(a: argparse.Namespace) -> int:
+    """Benchmark System One engines (local, Jev, LLM) on one labelled suite."""
+    import time
+    from pathlib import Path
+
+    from systemone.config import get_settings
+    from systemone.s1.bench import format_reports, jsonl_suite, phishing_suite, run_benchmark
+    from systemone.s1.factory import build_engine
+
+    s = get_settings()
+
+    async def go() -> int:
+        if a.suite == "phishing":
+            suite = await phishing_suite(a.n, a.seed, s.data_dir / "s1_bench_cache")
+        else:
+            if not a.questions:
+                print("a JSONL suite needs --questions questions.json", file=sys.stderr)
+                return 2
+            suite = jsonl_suite(Path(a.suite), Path(a.questions), a.gate)
+        engines = [build_engine(k.strip(), s) for k in a.engines.split(",") if k.strip()]
+        try:
+            res = await run_benchmark(suite, engines, concurrency=a.concurrency, hi=a.hi, lo=a.lo,
+                                      repeat_check=a.repeat_check)
+        finally:
+            for e in engines:
+                await e.aclose()
+        print(format_reports(suite, res.reports))
+        out = Path(a.out or s.data_dir / "eval_results") / f"s1-bench-{suite.name}-{time.strftime('%Y%m%d-%H%M%S')}.json"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(res.to_json(), indent=1, default=str))
+        print(f"\nfull results: {out}")
+        return 0
+
+    return asyncio.run(go())
+
+
 def cmd_doctor(_: argparse.Namespace) -> int:
     """Check the local host against the reference topology."""
     from systemone.adapters.byom import resolve
@@ -162,6 +198,19 @@ def main(argv: list[str] | None = None) -> int:
     v.set_defaults(fn=cmd_validate_model)
     sub.add_parser("templates", help="list starter templates").set_defaults(fn=cmd_templates)
     sub.add_parser("doctor", help="check hardware, Docker, Redis and model endpoints").set_defaults(fn=cmd_doctor)
+    b = sub.add_parser("s1-bench", help="benchmark System One engines (local / Jev / LLM) on a labelled suite")
+    b.add_argument("--suite", default="phishing", help="'phishing' (built in) or a JSONL file of {id, state, labels}")
+    b.add_argument("--questions", help="questions JSON for a JSONL suite ({qid: {type, instructions, criteria}})")
+    b.add_argument("--gate", help="noul question used for automation metrics (default: first noul)")
+    b.add_argument("--engines", default="local,jev,llm", help="comma-separated: local, jev, llm")
+    b.add_argument("-n", type=int, default=50, help="items to sample for the built-in suite")
+    b.add_argument("--seed", type=int, default=42)
+    b.add_argument("--concurrency", type=int, default=8)
+    b.add_argument("--hi", type=float, default=0.9, help="act automatically at p >= hi")
+    b.add_argument("--lo", type=float, default=0.1, help="close automatically at p <= lo")
+    b.add_argument("--repeat-check", type=int, default=10, help="items asked twice to check determinism (0 = off)")
+    b.add_argument("--out", help="directory for the JSON results (default: <data_dir>/eval_results)")
+    b.set_defaults(fn=cmd_s1_bench)
     a = p.parse_args(argv)
     return a.fn(a)
 
