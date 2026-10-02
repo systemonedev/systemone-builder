@@ -67,6 +67,31 @@ LEGIT = [
 STYLES = ["very short (1-2 sentences)", "short (2-4 sentences)", "medium (one paragraph)", "formal", "casual",
           "with a greeting and sign-off", "terse and urgent", "with a few typos"]
 
+# Calm, professional lures paired with legitimate twins from the real service. Loud
+# scams are easy; these teach the difference that matters: a look-alike sender, and
+# a request to sign in, confirm or pay through a link, versus a notice that sends
+# you to the account you already use (or needs nothing).
+SUBTLE_PAIRS = [
+    ("a calm, professional notice that a file was shared, which asks you to sign in with your work account on a link from a look-alike domain",
+     "a genuine file-share notification from the colleague's own company domain, pointing to the usual shared drive"),
+    ("a polite mailbox storage or password-expiry notice from a look-alike IT domain, offering a self-service link to keep the account working",
+     "a genuine IT notice from the company's real domain about a password policy, telling people to change it in the usual settings page"),
+    ("a quiet tax or payroll document notice (W-2, payslip) asking you to verify your login to download it",
+     "a genuine payroll notice from the company's HR domain saying payslips are available in the usual HR portal"),
+    ("a courteous subscription-renewal problem notice from a look-alike billing domain, asking to review payment details via a link",
+     "a genuine receipt or renewal confirmation from the real vendor domain, with no request to enter details"),
+    ("a short, discreet request from an executive's personal address to arrange a payment or share a phone number",
+     "a genuine short request from a manager's company address about ordinary work, with no money or secrets involved"),
+    ("a calm security-alert email from a look-alike domain asking you to confirm your account details",
+     "a genuine security alert from the real service that says no action is needed if it was you, and to check activity in your account settings"),
+    ("a professional MFA or device re-enrollment request from a look-alike domain with a link",
+     "a genuine IT announcement that MFA enrollment is done in person or in the usual company portal, with no link to an unknown site"),
+    ("a calm message from a colleague-like sender asking to send an invoice payment to new bank details because 'the portal is down'",
+     "a genuine accounts-payable note confirming an invoice was paid through the normal vendor portal"),
+]
+SUBTLE_STYLES = ["calm and professional, no urgency words", "brief and businesslike", "friendly and polite",
+                 "formal corporate tone"]
+
 SCHEMA = {"type": "object", "properties": {"from": {"type": "string"}, "subject": {"type": "string"},
                                            "body": {"type": "string"}},
           "required": ["from", "subject", "body"]}
@@ -80,10 +105,17 @@ def prompt(scenario: str, style: str, malicious: bool) -> str:
 
 
 async def generate(base_url: str, model: str, n_per_class: int, seed: int, concurrency: int = 16,
-                   api_key: str | None = None) -> list[dict[str, Any]]:
+                   api_key: str | None = None, subtle_share: float = 0.0) -> list[dict[str, Any]]:
+    """``n_per_class`` phishing + ``n_per_class`` legitimate emails; ``subtle_share`` of each
+    class comes from the matched calm-lure / legitimate-twin pairs."""
     rng = random.Random(seed)
-    jobs = [(True, rng.choice(PHISHING), rng.choice(STYLES)) for _ in range(n_per_class)] + \
-           [(False, rng.choice(LEGIT), rng.choice(STYLES)) for _ in range(n_per_class)]
+    n_subtle = int(n_per_class * subtle_share)
+    jobs = [(True, rng.choice(PHISHING), rng.choice(STYLES)) for _ in range(n_per_class - n_subtle)] + \
+           [(False, rng.choice(LEGIT), rng.choice(STYLES)) for _ in range(n_per_class - n_subtle)]
+    for _ in range(n_subtle):
+        lure, twin = rng.choice(SUBTLE_PAIRS)
+        style = rng.choice(SUBTLE_STYLES)
+        jobs += [(True, lure, style), (False, twin, style)]
     sem = asyncio.Semaphore(concurrency)
     headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
 

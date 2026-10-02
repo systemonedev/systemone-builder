@@ -71,6 +71,10 @@ def cmd_bench(a: argparse.Namespace) -> int:
             # 20 hand-written short, modern emails (evaluation only, never trained on)
             here = Path(__file__).parent / "system_one" / "suites"
             suite = jsonl_suite(here / "modern_email.jsonl", here / "modern_email.questions.json", "malicious")
+        elif a.suite == "modern2":
+            # 20 more, written before v0.3's subtle-phishing scenarios: a held-out check for them
+            here = Path(__file__).parent / "system_one" / "suites"
+            suite = jsonl_suite(here / "modern_email_2.jsonl", here / "modern_email_2.questions.json", "malicious")
         else:
             if not a.questions:
                 print("a JSONL suite needs --questions questions.json", file=sys.stderr)
@@ -93,7 +97,7 @@ def cmd_bench(a: argparse.Namespace) -> int:
     return asyncio.run(go())
 
 
-async def synthetic_email_rows(s, datasets, n_per_class: int, seed: int):  # noqa: ANN001, ANN201
+async def synthetic_email_rows(s, datasets, n_per_class: int, seed: int, subtle_share: float = 0.0):  # noqa: ANN001, ANN201
     """Teacher-written modern emails as training rows (cached in datasets/synthetic-email.jsonl)."""
     import random
 
@@ -102,13 +106,15 @@ async def synthetic_email_rows(s, datasets, n_per_class: int, seed: int):  # noq
     from systemone_builder.kenning.synthetic_email import generate
 
     teacher = resolve(s)["triage"]
-    cache = datasets / f"synthetic-email-n{n_per_class}-seed{seed}.jsonl"
+    tag = f"-subtle{int(subtle_share * 100)}" if subtle_share else ""
+    cache = datasets / f"synthetic-email-n{n_per_class}-seed{seed}{tag}.jsonl"
     if cache.exists():
         emails = [json.loads(x) for x in cache.read_text().splitlines() if x.strip()]
         print(f"[kenning-data] reusing {len(emails)} synthetic emails from {cache}")
     else:
         print(f"[kenning-data] asking {teacher.model} at {teacher.url} for {2 * n_per_class} modern emails ...", flush=True)
-        emails = await generate(teacher.url, teacher.model, n_per_class, seed, api_key=teacher.api_key())
+        emails = await generate(teacher.url, teacher.model, n_per_class, seed, concurrency=32,
+                                api_key=teacher.api_key(), subtle_share=subtle_share)
         cache.parent.mkdir(parents=True, exist_ok=True)
         cache.write_text("".join(json.dumps(e) + "\n" for e in emails))
     rng = random.Random(seed + 7)
@@ -119,6 +125,27 @@ async def synthetic_email_rows(s, datasets, n_per_class: int, seed: int):  # noq
     meta = {"dataset": f"synthetic: written by {teacher.model} from labelled scenarios", "file": str(cache),
             "license": "generated (teacher: Qwen2.5-7B-Instruct, Apache-2.0)"}
     return rows, meta
+
+
+async def synthetic_task_rows(s, datasets, per_task: int, seed: int):  # noqa: ANN001, ANN201
+    """Label-conditioned synthetic decision tasks (cached in datasets/)."""
+    from systemone_builder.adapters.byom import resolve
+    from systemone_builder.kenning.synthetic_tasks import TASKS, generate, to_training_rows
+
+    teacher = resolve(s)["triage"]
+    cache = datasets / f"synthetic-tasks-n{per_task}-seed{seed}.jsonl"
+    if cache.exists():
+        texts = [json.loads(x) for x in cache.read_text().splitlines() if x.strip()]
+        print(f"[kenning-data] reusing {len(texts)} synthetic task texts from {cache}")
+    else:
+        print(f"[kenning-data] asking {teacher.model} for {per_task * len(TASKS)} label-conditioned texts "
+              f"({len(TASKS)} tasks) ...", flush=True)
+        texts = await generate(teacher.url, teacher.model, per_task, seed, concurrency=32, api_key=teacher.api_key())
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        cache.write_text("".join(json.dumps(t) + "\n" for t in texts))
+    meta = {"dataset": f"synthetic: {len(TASKS)} label-conditioned tasks written by {teacher.model}", "file": str(cache),
+            "license": "generated (teacher: Qwen2.5-7B-Instruct, Apache-2.0)"}
+    return to_training_rows(texts, seed + 13), meta
 
 
 def cmd_data(a: argparse.Namespace) -> int:
@@ -148,10 +175,13 @@ def cmd_data(a: argparse.Namespace) -> int:
                 phishing_file.write_text("".join(json.dumps(r) + "\n" for r in prow))
             extra = {}
             if a.synthetic_email:
-                extra["synth_email"] = await synthetic_email_rows(s, out.parent, a.synthetic_email, a.seed)
-            rows, manifest = await multitask_rows(a.per_source, a.seed, phishing_file, a.phishing_rows,
-                                                  a.sources.split(",") if a.sources else None, a.layout_variation,
-                                                  extra)
+                extra["synth_email"] = await synthetic_email_rows(s, out.parent, a.synthetic_email, a.seed, a.subtle_share)
+            if a.synthetic_tasks:
+                extra["synth_tasks"] = await synthetic_task_rows(s, out.parent, a.synthetic_tasks, a.seed)
+            source_rows = {k: int(v) for k, v in (p.split("=") for p in a.source_rows.split(","))} if a.source_rows else None
+            rows, manifest = await multitask_rows(a.per_source, a.seed, phishing_file if a.phishing_rows else None,
+                                                  a.phishing_rows, a.sources.split(",") if a.sources else None,
+                                                  a.layout_variation, extra, source_rows)
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text("".join(json.dumps(r) + "\n" for r in rows))
         if manifest:
@@ -301,6 +331,11 @@ def main(argv: list[str] | None = None) -> int:
     d.add_argument("--synthetic-email", type=int, default=0, metavar="N",
                    help="add N phishing + N legitimate modern emails written by the triage model from labelled "
                         "scenarios (--task multitask; cached in datasets/)")
+    d.add_argument("--subtle-share", type=float, default=0.0,
+                   help="share of synthetic emails drawn from calm-lure / legitimate-twin pairs")
+    d.add_argument("--synthetic-tasks", type=int, default=0, metavar="N",
+                   help="add N label-conditioned texts per synthetic task (10 tasks) written by the triage model")
+    d.add_argument("--source-rows", help="per-source row counts overriding --per-source, e.g. nli=20000,clinc=3000")
     d.add_argument("--layout-variation", type=float, default=0.75,
                    help="share of rows re-laid out (renamed/nested fields, plain text, metadata) so the model "
                         "does not learn one state layout (--task multitask; 0 = off)")

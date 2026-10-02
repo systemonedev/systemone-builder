@@ -222,6 +222,12 @@ def make_civil(row: dict[str, Any], ctx: Ctx) -> dict[str, Any] | None:
     return _row(state, qs, targets, ctx, "civil")
 
 
+def accept_nli(row: dict[str, Any], ctx: Ctx) -> bool:
+    # MultiNLI is under the OANC's permissive licence except its fiction genre, which
+    # includes a CC-BY-SA-3.0 work (Williams et al., 2018): leave fiction out.
+    return row.get("genre") != "fiction"
+
+
 def accept_civil(row: dict[str, Any], ctx: Ctx) -> bool:
     # civil_comments is ~90% clean: keep every toxic comment, a fraction of clean ones
     return row["toxicity"] >= 0.2 or ctx.rng.random() < 0.25
@@ -232,7 +238,8 @@ SOURCES = {
     "dbpedia": Source("dbpedia", "fancyzhx/dbpedia_14", "dbpedia_14", "train", "CC-BY-SA-3.0", make_dbpedia),
     "clinc": Source("clinc", "clinc/clinc_oos", "plus", "train", "CC-BY-3.0", make_clinc),
     "boolq": Source("boolq", "google/boolq", "default", "train", "CC-BY-SA-3.0", make_boolq),
-    "nli": Source("nli", "nyu-mll/multi_nli", "default", "train", "CC-BY-3.0 (mixed per genre)", make_nli),
+    "nli": Source("nli", "nyu-mll/multi_nli", "default", "train", "OANC (permissive); fiction genre excluded",
+                  make_nli, accept_nli),
     "civil": Source("civil", "google/civil_comments", "default", "train", "CC0-1.0", make_civil, accept_civil),
 }
 
@@ -262,7 +269,7 @@ async def sample_source(client: httpx.AsyncClient, src: Source, n: int, rng: ran
             continue  # skip a page the server keeps refusing
         rows = [x["row"] for x in data.get("rows", [])]
         rng.shuffle(rows)
-        for row in rows[:25]:  # spread the sample over many pages
+        for row in rows[: 25 if n <= 2000 else 100]:  # spread small samples over many pages
             if len(out) >= n:
                 break
             if src.accept(row, ctx):
@@ -276,14 +283,15 @@ async def sample_source(client: httpx.AsyncClient, src: Source, n: int, rng: ran
 async def multitask_rows(per_source: int, seed: int, phishing_file: Path | None = None,
                          phishing_rows: int = 1500, sources: list[str] | None = None,
                          layout_variation: float = 0.75,
-                         extra: dict[str, tuple[list[dict[str, Any]], dict[str, Any]]] | None = None) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+                         extra: dict[str, tuple[list[dict[str, Any]], dict[str, Any]]] | None = None,
+                         source_rows: dict[str, int] | None = None) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     rng = random.Random(seed)
     rows: list[dict[str, Any]] = []
     manifest: dict[str, Any] = {"seed": seed, "sources": {}}
     async with httpx.AsyncClient(timeout=60) as client:
         for key in sources or list(SOURCES):
             src = SOURCES[key]
-            got = await sample_source(client, src, per_source, random.Random(rng.random()))
+            got = await sample_source(client, src, (source_rows or {}).get(key, per_source), random.Random(rng.random()))
             rows.extend(got)
             manifest["sources"][key] = {"dataset": src.dataset, "config": src.config, "split": src.split,
                                         "license": src.license, "rows": len(got)}

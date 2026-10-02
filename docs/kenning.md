@@ -182,3 +182,42 @@ lures look like the legitimate security notices in the data. The fix is more sub
 matched legitimate counterparts from the teacher, checked on a new held-out modern set (the 20
 hand-written emails must not become the training target). Until then, keep a person in the loop
 for credential-related email.
+
+### kenning-large-v0.3: the clean-licence recipe (not served)
+
+v0.3 tests whether Kenning can be built from permissively licensed parts only: base
+`answerdotai/ModernBERT-large` (Apache-2.0, pretrained only, no classification head) and training data
+under Apache-2.0, CC-BY-3.0, OANC and CC0, plus teacher-written synthetic data:
+
+| Source | Rows | Licence |
+|---|---|---|
+| `nyu-mll/multi_nli` (fiction genre excluded: it contains a CC-BY-SA work) | 20,000 | OANC |
+| `clinc/clinc_oos` | 3,000 | CC-BY-3.0 |
+| `fancyzhx/amazon_polarity` | 2,000 | Apache-2.0 |
+| `google/civil_comments` | 2,000 | CC0-1.0 |
+| synthetic modern emails, 40% calm-lure / legitimate-twin pairs (`--subtle-share`) | 1,985 | generated (Qwen2.5-7B-Instruct, Apache-2.0) |
+| synthetic label-conditioned tasks, 10 tasks (`kenning.synthetic_tasks`, `--synthetic-tasks`) | 2,793 | generated (Qwen2.5-7B-Instruct, Apache-2.0) |
+
+31,778 rows, 1 epoch at lr 3e-5, ~37 minutes. Held-out accuracy 0.435 (untrained head) → 0.922, ECE 0.0035.
+
+The held-out split is the training distribution (mostly NLI and synthetic), and it hid a large drop on
+real data. A new held-out set, `--suite modern2` (20 emails written before v0.3's subtle-phishing
+scenarios), was added:
+
+| | v0.2 | v0.3 | TypeSafe Jev |
+|---|---|---|---|
+| Phishing (50, real dataset) | 0.96 | 0.72 | 0.96 |
+| Layouts | 0.96–0.98 | 0.66–0.74 | 0.96 |
+| Out of domain: spam / emotion / news | 0.967 / 0.767 / 0.900 | 0.617 / 0.550 / 0.767 | 0.967 / 0.583 / 0.933 |
+| Modern (20; v0.2's and v0.3's scenarios were designed after seeing it) | 0.90 | 1.00 | 1.00 |
+| **Modern 2 (20, held out): accuracy** | 0.60 | 0.65 | **0.90** |
+| **Modern 2: phishing auto-closed as safe (p ≤ 0.1)** | **5** | 1 | 0 |
+
+**Conclusions.** The clean base gives up the zero-shot training that carried v0.1/v0.2 on real data,
+and ~32k clean rows do not replace it. The calm-lure / legitimate-twin pairs help (1 lure auto-closed
+instead of 5), but teacher-written data alone does not reach real-world accuracy. v0.2 stays active.
+**No Kenning version is fit yet to auto-close subtle modern phishing; keep a person in the loop.**
+
+Next candidates: a commercially-friendly zero-shot base (MoritzLaurer's `-c` models, e.g.
+`deberta-v3-large-zeroshot-v2.0-c`, trained only on permissively licensed data) with the v0.3 data,
+more and better subtle-phishing pairs (a stronger teacher), and a third held-out set.

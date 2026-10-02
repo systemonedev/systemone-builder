@@ -306,3 +306,30 @@ async def test_synthetic_emails_take_labels_from_the_scenario(monkeypatch):
     for r in rows:
         assert r["malicious"] == ("phishing" in r["email"]["body"])  # label follows the requested scenario
         assert set(r["email"]) == {"from", "subject", "body"}
+
+
+def test_synthetic_task_rows_follow_the_requested_labels():
+    from systemone_builder.kenning.synthetic_tasks import TASKS, rows_for
+
+    rng = random.Random(0)
+    for task in TASKS:
+        for seed in range(30):
+            labels = {a.name: random.Random(seed).choice(list(a.labels)) for a in task.attrs}
+            row = rows_for(task, "some text", labels, rng)
+            for qid, qd in row["questions"].items():
+                q = Question.model_validate(qd)
+                _, options = hypotheses(q)
+                vec = target_vector(q, options, row["targets"][qid])
+                assert sum(vec) == pytest.approx(1.0)
+                if q.type == "choice":
+                    assert row["targets"][qid] == labels[qid]
+                if q.type == "score":
+                    attr = next(a for a in task.attrs if a.name == qid)
+                    assert row["targets"][qid] == list(attr.labels).index(labels[qid])
+
+
+def test_nli_fiction_genre_is_excluded():
+    from systemone_builder.kenning.multitask import accept_nli
+
+    ctx = _ctx()
+    assert accept_nli({"genre": "government"}, ctx) and not accept_nli({"genre": "fiction"}, ctx)
