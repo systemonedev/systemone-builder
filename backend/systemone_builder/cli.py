@@ -55,7 +55,7 @@ def cmd_bench(a: argparse.Namespace) -> int:
     from pathlib import Path
 
     from systemone_builder.config import get_settings
-    from systemone_builder.system_one.bench import format_reports, jsonl_suite, ood_suite, phishing_suite, run_benchmark
+    from systemone_builder.system_one.bench import format_reports, jsonl_suite, layout_suite, ood_suite, phishing_suite, run_benchmark
     from systemone_builder.system_one.factory import build_engine
 
     s = get_settings()
@@ -65,6 +65,12 @@ def cmd_bench(a: argparse.Namespace) -> int:
             suite = await phishing_suite(a.n, a.seed, s.kenning_dir() / "bench_cache")
         elif a.suite == "ood":
             suite = await ood_suite(a.n, a.seed, s.kenning_dir() / "bench_cache")
+        elif a.suite == "layouts":
+            suite = await layout_suite(a.n, a.seed, s.kenning_dir() / "bench_cache")
+        elif a.suite == "modern":
+            # 20 hand-written short, modern emails (evaluation only, never trained on)
+            here = Path(__file__).parent / "system_one" / "suites"
+            suite = jsonl_suite(here / "modern_email.jsonl", here / "modern_email.questions.json", "malicious")
         else:
             if not a.questions:
                 print("a JSONL suite needs --questions questions.json", file=sys.stderr)
@@ -85,6 +91,34 @@ def cmd_bench(a: argparse.Namespace) -> int:
         return 0
 
     return asyncio.run(go())
+
+
+async def synthetic_email_rows(s, datasets, n_per_class: int, seed: int):  # noqa: ANN001, ANN201
+    """Teacher-written modern emails as training rows (cached in datasets/synthetic-email.jsonl)."""
+    import random
+
+    from systemone_builder.adapters.byom import resolve
+    from systemone_builder.kenning.data import questions_for
+    from systemone_builder.kenning.synthetic_email import generate
+
+    teacher = resolve(s)["triage"]
+    cache = datasets / f"synthetic-email-n{n_per_class}-seed{seed}.jsonl"
+    if cache.exists():
+        emails = [json.loads(x) for x in cache.read_text().splitlines() if x.strip()]
+        print(f"[kenning-data] reusing {len(emails)} synthetic emails from {cache}")
+    else:
+        print(f"[kenning-data] asking {teacher.model} at {teacher.url} for {2 * n_per_class} modern emails ...", flush=True)
+        emails = await generate(teacher.url, teacher.model, n_per_class, seed, api_key=teacher.api_key())
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        cache.write_text("".join(json.dumps(e) + "\n" for e in emails))
+    rng = random.Random(seed + 7)
+    rows = []
+    for e in emails:
+        qs, targets = questions_for(rng, e["malicious"])
+        rows.append({"state": {"email": e["email"]}, "questions": qs, "targets": targets})
+    meta = {"dataset": f"synthetic: written by {teacher.model} from labelled scenarios", "file": str(cache),
+            "license": "generated (teacher: Qwen2.5-7B-Instruct, Apache-2.0)"}
+    return rows, meta
 
 
 def cmd_data(a: argparse.Namespace) -> int:
@@ -112,8 +146,12 @@ def cmd_data(a: argparse.Namespace) -> int:
                 phishing_file.parent.mkdir(parents=True, exist_ok=True)
                 prow = await phishing_training_rows(4000, 7, cache)
                 phishing_file.write_text("".join(json.dumps(r) + "\n" for r in prow))
+            extra = {}
+            if a.synthetic_email:
+                extra["synth_email"] = await synthetic_email_rows(s, out.parent, a.synthetic_email, a.seed)
             rows, manifest = await multitask_rows(a.per_source, a.seed, phishing_file, a.phishing_rows,
-                                                  a.sources.split(",") if a.sources else None)
+                                                  a.sources.split(",") if a.sources else None, a.layout_variation,
+                                                  extra)
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text("".join(json.dumps(r) + "\n" for r in rows))
         if manifest:
@@ -240,7 +278,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("doctor", help="check hardware, Docker, Redis and model endpoints").set_defaults(fn=cmd_doctor)
     b = sub.add_parser("bench", aliases=["s1-bench"], help="benchmark System One engines (Kenning, local LLM, opt-in Jev) on a labelled suite")
     b.add_argument("--suite", default="phishing",
-                   help="'phishing', 'ood' (tasks never trained on; -n per task) or a JSONL file of {id, state, labels}")
+                   help="'phishing', 'ood' (tasks never trained on; -n per task), 'layouts' (the phishing emails in 4 layouts), 'modern' (20 hand-written modern emails) or a JSONL file of {id, state, labels}")
     b.add_argument("--questions", help="questions JSON for a JSONL suite ({qid: {type, instructions, criteria}})")
     b.add_argument("--gate", help="noul question used for automation metrics (default: first noul)")
     b.add_argument("--engines", default="kenning,local",
@@ -260,6 +298,12 @@ def main(argv: list[str] | None = None) -> int:
     d.add_argument("--per-source", type=int, default=1200, help="rows per public dataset (--task multitask)")
     d.add_argument("--phishing-rows", type=int, default=1500, help="phishing rows mixed in (--task multitask)")
     d.add_argument("--sources", help="comma-separated subset of: amazon, dbpedia, clinc, boolq, nli, civil")
+    d.add_argument("--synthetic-email", type=int, default=0, metavar="N",
+                   help="add N phishing + N legitimate modern emails written by the triage model from labelled "
+                        "scenarios (--task multitask; cached in datasets/)")
+    d.add_argument("--layout-variation", type=float, default=0.75,
+                   help="share of rows re-laid out (renamed/nested fields, plain text, metadata) so the model "
+                        "does not learn one state layout (--task multitask; 0 = off)")
     d.add_argument("--seed", type=int, default=7)
     d.add_argument("--bench-n", type=int, default=50, help="benchmark suite size to exclude (as used by bench)")
     d.add_argument("--bench-seed", type=int, default=42)

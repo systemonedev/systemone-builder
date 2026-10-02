@@ -42,6 +42,7 @@ from typing import Any, Callable
 
 import httpx
 
+from systemone_builder.kenning.layouts import vary
 from systemone_builder.system_one.bench import hf_get
 MAX_CHARS = 1500
 
@@ -273,7 +274,9 @@ async def sample_source(client: httpx.AsyncClient, src: Source, n: int, rng: ran
 
 
 async def multitask_rows(per_source: int, seed: int, phishing_file: Path | None = None,
-                         phishing_rows: int = 1500, sources: list[str] | None = None) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+                         phishing_rows: int = 1500, sources: list[str] | None = None,
+                         layout_variation: float = 0.75,
+                         extra: dict[str, tuple[list[dict[str, Any]], dict[str, Any]]] | None = None) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     rng = random.Random(seed)
     rows: list[dict[str, Any]] = []
     manifest: dict[str, Any] = {"seed": seed, "sources": {}}
@@ -294,6 +297,21 @@ async def multitask_rows(per_source: int, seed: int, phishing_file: Path | None 
         manifest["sources"]["phishing"] = {"dataset": "zefang-liu/phishing-email-dataset", "license": "see dataset card",
                                            "rows": min(phishing_rows, len(ph)), "file": str(phishing_file)}
         print(f"[kenning-data] phishing {min(phishing_rows, len(ph)):>5} rows  (from {phishing_file})", flush=True)
+    for key, (extra_rows, meta) in (extra or {}).items():
+        for x in extra_rows:
+            x["source"] = key
+        rows.extend(extra_rows)
+        manifest["sources"][key] = {**meta, "rows": len(extra_rows)}
+        print(f"[kenning-data] {key:<8} {len(extra_rows):>5} rows  ({meta.get('dataset')}, {meta.get('license')})", flush=True)
+    if layout_variation > 0:
+        lrng = random.Random(seed + 101)
+        varied = 0
+        for r in rows:
+            if lrng.random() < layout_variation:
+                r["state"] = vary(r["state"], lrng)
+                varied += 1
+        manifest["layout_variation"] = {"share": layout_variation, "rows_varied": varied}
+        print(f"[kenning-data] re-laid out {varied} of {len(rows)} states (layouts module)", flush=True)
     rng.shuffle(rows)
     yes = [t for r in rows for q, t in r["targets"].items() if r["questions"][q]["type"] == "noul"]
     manifest["rows"] = len(rows)

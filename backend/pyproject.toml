@@ -34,6 +34,7 @@ include = ["systemone*"]
 
 [tool.setuptools.package-data]
 "systemone_builder.templates" = ["*.json"]
+"systemone_builder.system_one" = ["suites/*.jsonl", "suites/*.json"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

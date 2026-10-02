@@ -96,8 +96,11 @@ sources ("is this a product review?" of an encyclopedia article) are mostly "no"
 
 `systemone bench --suite phishing` uses 50 unseen, balanced emails from the phishing dataset;
 `--suite ood` uses tasks never trained on (`ucirvine/sms_spam`, `dair-ai/emotion`,
-`fancyzhx/ag_news`, `-n` items per task). Engines: `kenning` (this model), `jev` (opt-in TypeSafe Jev with your own key,
-`TYPESAFE_API_KEY`), `local` (an LLM's label-token readout), `llm` (an LLM writing JSON).
+`fancyzhx/ag_news`, `-n` items per task); `--suite layouts` asks about the same 50 phishing emails in
+four layouts (the training layout, `from`/`subject`/`body` JSON, plain text with headers, nested with
+metadata) to measure layout sensitivity; `--suite modern` is 20 hand-written short, modern emails
+(evaluation only, never trained on). Engines: `kenning` (this model), `jev` (opt-in TypeSafe Jev with
+your own key, `TYPESAFE_API_KEY`), `local` (an LLM's label-token readout), `llm` (an LLM writing JSON).
 
 ## Results so far
 
@@ -142,3 +145,40 @@ sent its borderline cases to a human. Until that is fixed (a stricter auto-act t
 0.95 for that question, more training, or a heavier phishing share), keep a human on its automated
 phishing decisions. 50 emails is a small sample; a larger held-out set would make the comparison
 firmer.
+
+### kenning-large-v0.2: layout variation and teacher-written modern emails
+
+v0.1 had learned the layout along with the task: every phishing training row looked like
+`{"email": {"recipient", "body"}}`, and the public phishing data is mostly old (Enron-era spam, 419
+scams). Asked about a short, modern credential lure laid out as `from`/`subject`/`body`, it said
+"Safe". v0.2 adds:
+
+- **layout variation** on 75% of all training rows (`kenning.layouts`: renamed and nested fields,
+  plain text with headers, unrelated metadata; synthetic sender and subject values are drawn
+  independently of the label);
+- **1,492 modern emails written by the local teacher** (Qwen2.5-7B-Instruct, Apache-2.0) from 20
+  phishing and 20 legitimate scenarios, including hard legitimate ones (real security alerts,
+  requested password resets, verification codes, paid-invoice confirmations). Labels come from the
+  requested scenario, never from the teacher's judgement (`kenning.synthetic_email`,
+  `systemone data --synthetic-email N`).
+
+10,192 rows, 1 epoch, ~22 minutes. Held-out accuracy 0.74 zero-shot → 0.94 trained, ECE 0.007
+calibrated.
+
+| | v0.1 | v0.2 | TypeSafe Jev |
+|---|---|---|---|
+| Modern emails (20, hand-written): accuracy | 0.70 | **0.90** | 1.00 |
+| Modern: phishing auto-closed as safe (p ≤ 0.1) | 4 | **1** | 0 |
+| Layouts: accuracy across the 4 layouts | 0.94–0.96 | **0.96–0.98** | 0.96 |
+| Phishing (50): accuracy / ECE | 0.960 / 0.039 | 0.960 / 0.031 | 0.960 / 0.109 |
+| Phishing: category accuracy | 0.940 | 0.960 | 0.960 |
+| Out of domain: spam / emotion / news | 0.967 / 0.750 / 0.933 | 0.967 / 0.767 / 0.900 | 0.967 / 0.583 / 0.933 |
+| Latency p50, one at a time (modern / ood) | – | 23 ms / 28 ms | ~150 ms |
+
+**Known failure:** one subtle credential lure ("your mailbox password expires, keep it by confirming
+here", from a look-alike helpdesk domain) is still answered "no" with high confidence (0.008), and a
+shared-document login lure gets 0.34. The teacher's phishing tends to be loud; calm, corporate-sounding
+lures look like the legitimate security notices in the data. The fix is more subtle phishing and
+matched legitimate counterparts from the teacher, checked on a new held-out modern set (the 20
+hand-written emails must not become the training target). Until then, keep a person in the loop
+for credential-related email.

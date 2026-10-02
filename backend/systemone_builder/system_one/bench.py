@@ -203,6 +203,29 @@ async def ood_suite(n_per_task: int, seed: int, cache_dir: Path | None) -> Suite
                  OOD_QUESTIONS, items, gate="spam")
 
 
+LAYOUTS = ("original", "headers_json", "plain_text", "nested_metadata")
+
+
+async def layout_suite(n: int, seed: int, cache_dir: Path | None) -> Suite:
+    """The phishing benchmark emails, each in four layouts: is the answer layout-independent?
+
+    Accuracy per layout appears as one question per layout (``malicious@<layout>``).
+    """
+    from systemone_builder.kenning.layouts import email_layouts
+
+    base = await phishing_suite(n, seed, cache_dir)
+    rng = random.Random(seed + 1)
+    q = "Is this email a phishing attempt, scam or other security threat?"
+    questions = {f"malicious@{name}": Question(type="noul", instructions=q) for name in LAYOUTS}
+    items = []
+    for it in base.items:
+        truth = it.labels["is_malicious"]
+        for name, state in email_layouts(it.state["email"]["body"], rng).items():
+            items.append(Item(id=f"{it.id}@{name}", state=state, labels={f"malicious@{name}": truth}))
+    return Suite("layouts", f"{base.description}, each in {len(LAYOUTS)} layouts ({', '.join(LAYOUTS)})", questions, items,
+                 gate="malicious@headers_json")
+
+
 def jsonl_suite(path: Path, questions_path: Path, gate: str | None = None) -> Suite:
     questions = {k: Question.model_validate(v) for k, v in json.loads(questions_path.read_text()).items()}
     items = []

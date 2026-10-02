@@ -243,3 +243,66 @@ def test_client_library_templates_match_the_server():
         assert local.hypotheses(c) == hypotheses(Question.model_validate(c))
     assert local.spread_confidence([0.6, 0.3, 0.1]) == pytest.approx(
         __import__("systemone_builder.system_one.contract", fromlist=["x"]).spread_confidence([0.6, 0.3, 0.1]))
+
+
+# ------------------------------------------------------------ state layouts
+def _all_text(x):
+    if isinstance(x, dict):
+        return " ".join(_all_text(v) for v in x.values())
+    return str(x)
+
+
+def test_layout_variation_keeps_the_content_and_varies_the_shape():
+    from systemone_builder.kenning.layouts import vary
+
+    body = "Your account is locked, confirm your password at http://reset.example"
+    shapes = set()
+    for seed in range(200):
+        out = vary({"email": {"recipient": "a@b.com", "body": body}}, random.Random(seed))
+        assert body in _all_text(out)  # the content is never lost
+        shapes.add(type(out).__name__ + ":" + (",".join(sorted(out)) if isinstance(out, dict) else "text"))
+    assert len(shapes) > 20  # many different layouts
+    assert any(s.startswith("str:") for s in shapes)  # some plain text
+
+
+def test_synthetic_headers_do_not_depend_on_the_label():
+    from systemone_builder.kenning.layouts import enrich_email
+
+    # same rng state -> same sender/date whatever the body (and so whatever the label)
+    a = enrich_email({"body": "Hello team, lunch at noon"}, random.Random(5))
+    b = enrich_email({"body": "Send gift cards now or your account closes"}, random.Random(5))
+    assert a["from"] == b["from"] and a.get("date") == b.get("date")
+
+
+def test_email_layouts_cover_the_four_benchmark_shapes():
+    from systemone_builder.kenning.layouts import email_layouts
+
+    layouts = email_layouts("Click here to verify your bank details", random.Random(1))
+    assert set(layouts) == {"original", "headers_json", "plain_text", "nested_metadata"}
+    assert all("verify your bank details" in _all_text(v) for v in layouts.values())
+    assert layouts["plain_text"].startswith("From: ")
+
+
+async def test_synthetic_emails_take_labels_from_the_scenario(monkeypatch):
+    import httpx
+
+    from systemone_builder.kenning import synthetic_email as se
+
+    calls = {"n": 0}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        if calls["n"] % 5 == 0:
+            return httpx.Response(200, json={"choices": [{"message": {"content": "not json"}}]})  # dropped
+        body = json.loads(req.content)
+        text = body["messages"][0]["content"]
+        email = {"from": "a@b.example", "subject": "Hi", "body": f"email {calls['n']} :: {text[:90]}"}
+        return httpx.Response(200, json={"choices": [{"message": {"content": json.dumps(email)}}]})
+
+    real = httpx.AsyncClient
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: real(transport=httpx.MockTransport(handler), **kw))
+    rows = await se.generate("http://teacher/v1", "m", 10, seed=1, concurrency=4)
+    assert 0 < len(rows) < 20  # one in five answers was not valid JSON
+    for r in rows:
+        assert r["malicious"] == ("phishing" in r["email"]["body"])  # label follows the requested scenario
+        assert set(r["email"]) == {"from", "subject", "body"}
