@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from systemone.orchestrator.gpu import GpuMonitor, GpuStatus
+from systemone_builder.orchestrator.gpu import GpuMonitor, GpuStatus
 
 
 class Scripted(GpuMonitor):
@@ -38,7 +38,7 @@ async def test_times_out_when_not_enough_free():
 
 
 def test_placement_warning_when_triage_gpu_idle():
-    from systemone.orchestrator.gpu import placement_warnings
+    from systemone_builder.orchestrator.gpu import placement_warnings
 
     gpus = [GpuStatus(0, "a", 24576, 23522, 0), GpuStatus(1, "b", 24576, 450, 0)]
     w = placement_warnings(gpus, {"triage": 1}, {"triage"})

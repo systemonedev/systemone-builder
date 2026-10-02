@@ -9,15 +9,30 @@ import { notify } from "@/utils/notify";
 import { ActivityBanner, LiveIndicator, Toasts, type Activity } from "@/components/Activity";
 import { ServiceList, useServices } from "@/components/Services";
 
-const NAV = [
-  { href: "/", label: "Telemetry" },
-  { href: "/routing", label: "Fast-Slow Routing" },
-  { href: "/playground", label: "Playground" },
-  { href: "/replay", label: "Replay Explorer" },
-  { href: "/dpo", label: "DPO Corrections" },
-  { href: "/training", label: "Factory & Training" },
-  { href: "/eval", label: "Evaluation" },
-  { href: "/workflows", label: "Prompt-to-Workflow" },
+const NAV: { section: string; hint?: string; items: { href: string; label: string }[] }[] = [
+  {
+    section: "Kenning",
+    items: [
+      { href: "/", label: "Overview" },
+      { href: "/models", label: "Models" },
+      { href: "/try", label: "Try it" },
+      { href: "/connect", label: "Connect" },
+    ],
+  },
+  {
+    section: "Legacy pipeline",
+    hint: "The original generative path: vLLM student → triage → oracle",
+    items: [
+      { href: "/telemetry", label: "Telemetry" },
+      { href: "/routing", label: "Fast-Slow Routing" },
+      { href: "/playground", label: "Playground" },
+      { href: "/replay", label: "Replay Explorer" },
+      { href: "/dpo", label: "DPO Corrections" },
+      { href: "/training", label: "Factory & Training" },
+      { href: "/eval", label: "Evaluation" },
+      { href: "/workflows", label: "Prompt-to-Workflow" },
+    ],
+  },
 ];
 
 function ThemeToggle() {
@@ -131,19 +146,26 @@ export function Shell({ children }: { children: ReactNode }) {
           </button>
         </div>
         <nav className={`${open ? "block" : "hidden"} px-2 pb-3 md:block`}>
-          {NAV.map((n) => {
-            const active = n.href === "/" ? path === "/" : path.startsWith(n.href);
-            return (
-              <Link
-                key={n.href}
-                href={n.href}
-                onClick={() => setOpen(false)}
-                className={`block rounded-md px-3 py-1.5 text-[13px] ${active ? "bg-surface-2 font-medium text-ink" : "text-ink-2 hover:text-ink"}`}
-              >
-                {n.label}
-              </Link>
-            );
-          })}
+          {NAV.map((group) => (
+            <div key={group.section} className="mb-3">
+              <div className="px-3 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wider text-ink-3" title={group.hint}>
+                {group.section}
+              </div>
+              {group.items.map((n) => {
+                const active = n.href === "/" ? path === "/" : path.startsWith(n.href);
+                return (
+                  <Link
+                    key={n.href}
+                    href={n.href}
+                    onClick={() => setOpen(false)}
+                    className={`block rounded-md px-3 py-1.5 text-[13px] ${active ? "bg-surface-2 font-medium text-ink" : "text-ink-2 hover:text-ink"}`}
+                  >
+                    {n.label}
+                  </Link>
+                );
+              })}
+            </div>
+          ))}
         </nav>
         <div className={`${open ? "block" : "hidden"} space-y-2 border-t border-line px-4 py-3 text-xs text-ink-3 md:block`}>
           <ServiceList snap={ok ? services.data : null} apiUp={ok} />

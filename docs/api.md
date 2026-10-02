@@ -137,15 +137,15 @@ description or `null`; the local engine reads up to 20), `score` (`criteria` is 
 `S1_SYSTEM_ONE_LOCAL_MODEL`, default: the triage server); `confidence` is `(max p − 1/n)/(1 − 1/n)`, the
 formula Jev's published examples follow. The response adds `latency_ms`, which Jev does not send.
 
-### Benchmark: `systemone s1-bench`
+### Benchmark: `systemone bench`
 
 Runs the same questions over the same labelled items on each engine and reports accuracy,
 calibration (Brier, ECE), gating (automation rate, false positives acted on, false negatives
 auto-closed at `--hi`/`--lo`), latency, errors, and determinism (items asked twice).
 
 ```bash
-docker compose exec api systemone s1-bench --engines local,jev,llm -n 50
-docker compose exec api systemone s1-bench --suite /data/my.jsonl --questions /data/questions.json
+docker compose exec api systemone bench --engines kenning,local -n 50
+docker compose exec api systemone bench --suite /data/my.jsonl --questions /data/questions.json
 ```
 
 Engines: `local` (this server's engine), `jev` (TypeSafe Jev, authenticated with

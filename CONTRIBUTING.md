@@ -5,7 +5,7 @@ Thanks for helping democratize System-1 distillation.
 ## Layout
 
 ```
-backend/systemone/     orchestrator, routing, factory, training, DPO, evaluation, API
+backend/systemone_builder/     orchestrator, routing, factory, training, DPO, evaluation, API
 backend/tests/         pytest suite (pure logic + real Redis)
 frontend/              Next.js + Tailwind dashboard
 docker/                images: api, student (vLLM), trainer (Unsloth), dashboard, redis.conf
@@ -23,7 +23,7 @@ docs/                  user documentation
   and must not break prompt-prefix stability (canonical JSON, `prompt_key_order`, scrubbing).
 * **Contracts first.** New domains belong in `systemone/templates/*.json` and must pass
   `tests/test_phase7_dx.py::test_default_domains_and_templates_are_self_consistent`.
-* **Adapters are plugins.** Prefer an entry-point plugin (`systemone.adapters`) over adding
+* **Adapters are plugins.** Prefer an entry-point plugin (`systemone_builder.adapters`) over adding
   a provider to core.
 
 ## Workflow

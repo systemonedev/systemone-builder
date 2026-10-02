@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from systemone.domains.builtin import SECOPS
-from systemone.telemetry.collector import parse_prometheus
-from systemone.workflow.engine import WorkflowEngine, classify, slugify
+from systemone_builder.domains.builtin import SECOPS
+from systemone_builder.telemetry.collector import parse_prometheus
+from systemone_builder.workflow.engine import WorkflowEngine, classify, slugify
 
 PROM = """# HELP vllm:prefix_cache_hits_total hits
 # TYPE vllm:prefix_cache_hits_total counter

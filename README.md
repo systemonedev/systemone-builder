@@ -9,6 +9,26 @@ workflow, data schemas and synthetic-data parameters, runs a local
 distill → train → hot-reload loop, benchmarks the result on real held-out data and
 serves it behind a confidence-routed fast/slow cascade. No closed-source APIs.
 
+## Start here: Kenning
+
+**Kenning** is the project's System One model: typed questions about program state in, calibrated
+answers out, in one forward pass, with no text generation. It runs locally (about 1–2 GB of VRAM),
+answers in tens of milliseconds, and gives the same answer every time for the same request.
+
+* **Dashboard → Kenning**: *Models* (trained models, held-out results, activate, export a bundle with
+  a model card and licences), *Try it* (ask your own questions live), *Connect* (code for your
+  projects).
+* **Client library**: [`clients/python`](clients/python) (`pip install systemone`, from this repo for
+  now): `Client("http://localhost:8093").system_one(state=..., questions={...})`, or run an exported
+  model in-process with `Kenning.from_pretrained(path)`.
+* **Train and benchmark your own**: [docs/kenning.md](docs/kenning.md).
+
+The wire format (`POST /v1/systemone`) is compatible with TypeSafe AI's System One API. This project is
+not affiliated with or endorsed by TypeSafe AI, and its models are not trained on TypeSafe outputs.
+
+The rest of this README describes the original generative pipeline (vLLM student → triage → oracle),
+shown under *Legacy pipeline* in the dashboard.
+
 Primary example domains:
 
 * **Real-time computer-use**: GUI/DOM and vision automation with pixel-coordinate fallbacks.
@@ -82,7 +102,7 @@ Redis and all three model endpoints.
 | **G** Evaluation & accuracy suite | Held-out benchmarking: accuracy, success rate, hallucination ratio, latency/TTFT distributions, calibration, readiness gates | `evaluation/` |
 | **H** Open-source DX | One-command quickstart, BYOM adapters/plugins, starter templates, CLI | `quickstart/`, `adapters/`, `templates/`, `cli.py` |
 
-Backend code lives under `backend/systemone/`.
+Backend code lives under `backend/systemone_builder/`.
 
 ## Using it
 

@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import base64
 
-from systemone.domains.builtin import COMPUTER_USE, SECOPS
-from systemone.extraction.fuzzy import EntityVault, FuzzyScrubber, ScrubPolicy
-from systemone.extraction.pipeline import Observation, StateExtractor
-from systemone.extraction.prompt import PrefixTracker, canonical_state, format_action
+from systemone_builder.domains.builtin import COMPUTER_USE, SECOPS
+from systemone_builder.extraction.fuzzy import EntityVault, FuzzyScrubber, ScrubPolicy
+from systemone_builder.extraction.pipeline import Observation, StateExtractor
+from systemone_builder.extraction.prompt import PrefixTracker, canonical_state, format_action
 
 PAGE = """<html><body>
 <h1>Sign in</h1><div id="lbl">Email address</div><input aria-labelledby="lbl">

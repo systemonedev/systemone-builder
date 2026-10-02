@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import asyncio
 
-from systemone.contracts.replay import Outcome, ReplayRecord
-from systemone.datastore.replay_buffer import RedisReplayBuffer
-from systemone.datastore.store import JsonStore
-from systemone.telemetry.bus import EventBus
+from systemone_builder.contracts.replay import Outcome, ReplayRecord
+from systemone_builder.datastore.replay_buffer import RedisReplayBuffer
+from systemone_builder.datastore.store import JsonStore
+from systemone_builder.telemetry.bus import EventBus
 
 
 def rec(i: int) -> ReplayRecord:
@@ -59,8 +59,8 @@ async def test_event_bus_fanout():
 def test_api_refuses_lan_bind_without_real_key():
     import pytest
 
-    from systemone.api.app import check_exposure
-    from systemone.config import Settings
+    from systemone_builder.api.app import check_exposure
+    from systemone_builder.config import Settings
 
     check_exposure(Settings(bind_addr="127.0.0.1", api_key=None))  # loopback: warning only
     with pytest.raises(RuntimeError, match="S1_API_KEY"):

@@ -30,6 +30,7 @@ const STATE: Record<string, { status: "good" | "warning" | "serious" | "critical
 
 const LABEL: Record<string, string> = {
   api: "API",
+  kenning: "Kenning · System One model",
   redis: "Redis (RAM datastore)",
   student: "Student · GPU 0",
   triage: "Triage · GPU 1",
@@ -40,7 +41,7 @@ export function useServices(intervalMs = 4000) {
   return usePoll<ServicesSnapshot>("/services", intervalMs);
 }
 
-const SHORT: Record<string, string> = { api: "API", redis: "Redis", student: "Student", triage: "Triage", oracle: "Oracle" };
+const SHORT: Record<string, string> = { api: "API", kenning: "Kenning", redis: "Redis", student: "Student", triage: "Triage", oracle: "Oracle" };
 
 const ICON: Record<string, [string, string]> = {
   good: ["●", "var(--good)"],

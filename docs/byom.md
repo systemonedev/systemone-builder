@@ -53,7 +53,7 @@ container too, so vLLM serves the same base until the first fine-tune lands.
 ### Writing a plugin
 
 ```python
-from systemone.adapters.base import Generation, ModelAdapter
+from systemone_builder.adapters.base import Generation, ModelAdapter
 
 class MLXAdapter(ModelAdapter):
     kind = "mlx"
@@ -64,7 +64,7 @@ class MLXAdapter(ModelAdapter):
 ```
 
 ```toml
-[project.entry-points."systemone.adapters"]
+[project.entry-points."systemone_builder.adapters"]
 mlx = "my_pkg.adapters:MLXAdapter"
 ```
 

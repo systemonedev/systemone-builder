@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import math
 
-from systemone.adapters.base import TokenLogprob
-from systemone.domains.builtin import COMPUTER_USE, SECOPS
-from systemone.routing.confidence import Calibration, ConfidenceScorer, token_field_confidence
-from systemone.routing.parse import parse_action
+from systemone_builder.adapters.base import TokenLogprob
+from systemone_builder.domains.builtin import COMPUTER_USE, SECOPS
+from systemone_builder.routing.confidence import Calibration, ConfidenceScorer, token_field_confidence
+from systemone_builder.routing.parse import parse_action
 
 STATE = {"url": "u", "viewport_tree": [{"id": 3, "role": "button", "name": "Save"}], "temporal_buffer": []}
 

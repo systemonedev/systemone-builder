@@ -5,13 +5,13 @@ import json
 
 import pytest
 
-from systemone.adapters.byom import AdapterHandle, EndpointConfig, resolve, validate_hf_model
-from systemone.adapters.factory import build_adapter, load_plugins
-from systemone.config import Settings
-from systemone.extraction.pipeline import Observation, StateExtractor
-from systemone.extraction.prompt import PromptBuilder
-from systemone.quickstart.webgen import generate
-from systemone.templates import all_templates, list_templates
+from systemone_builder.adapters.byom import AdapterHandle, EndpointConfig, resolve, validate_hf_model
+from systemone_builder.adapters.factory import build_adapter, load_plugins
+from systemone_builder.config import Settings
+from systemone_builder.extraction.pipeline import Observation, StateExtractor
+from systemone_builder.extraction.prompt import PromptBuilder
+from systemone_builder.quickstart.webgen import generate
+from systemone_builder.templates import all_templates, list_templates
 
 
 @pytest.mark.parametrize("tid", sorted(all_templates()))
