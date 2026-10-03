@@ -193,6 +193,25 @@ def cmd_data(a: argparse.Namespace) -> int:
     return asyncio.run(go())
 
 
+def cmd_label(a: argparse.Namespace) -> int:
+    """Distil: add a teacher's soft targets to training rows (Clef by default)."""
+    from pathlib import Path
+
+    from systemone_builder.config import get_settings
+    from systemone_builder.kenning.distill import label_file
+
+    s = get_settings()
+    url = a.teacher_url or s.clef_url
+    src = Path(a.data)
+    dst = Path(a.out or src.with_name(src.stem + f"-{a.teacher_name}.jsonl"))
+    report = label_file(src, dst, url, a.teacher_name, a.alpha, a.batch, a.limit)
+    print(f"wrote {dst}")
+    for source, r in sorted(report.items()):
+        print(f"  {source:<12} {r['questions']:>6} questions  teacher agrees with labels {r['agreement']:.1%}  "
+              f"failed {r['failed']}")
+    return 0
+
+
 def cmd_doctor(_: argparse.Namespace) -> int:
     """Check the local host against the reference topology."""
     from systemone_builder.adapters.byom import resolve
@@ -331,6 +350,15 @@ def main(argv: list[str] | None = None) -> int:
     d.add_argument("--synthetic-email", type=int, default=0, metavar="N",
                    help="add N phishing + N legitimate modern emails written by the triage model from labelled "
                         "scenarios (--task multitask; cached in datasets/)")
+    lb = sub.add_parser("label", help="distil: add a teacher's soft targets to training rows (Clef by default)")
+    lb.add_argument("data", help="training JSONL (from `systemone data`)")
+    lb.add_argument("--out", help="output JSONL (default: <data>-<teacher-name>.jsonl)")
+    lb.add_argument("--teacher-url", help="teacher server root speaking /v1/systemone/batch (default: S1_CLEF_URL)")
+    lb.add_argument("--teacher-name", default="clef-flash")
+    lb.add_argument("--alpha", type=float, default=0.5, help="1 = teacher only, 0.5 = average with existing labels")
+    lb.add_argument("--batch", type=int, default=16)
+    lb.add_argument("--limit", type=int, help="only the first N rows (quick checks)")
+    lb.set_defaults(fn=cmd_label)
     d.add_argument("--subtle-share", type=float, default=0.0,
                    help="share of synthetic emails drawn from calm-lure / legitimate-twin pairs")
     d.add_argument("--synthetic-tasks", type=int, default=0, metavar="N",

@@ -24,7 +24,15 @@ from typing import Any
 
 from systemone_builder.kenning.model import CONFIG_FILE, read_config
 
-BASE_LICENSES = {"MoritzLaurer/ModernBERT-large-zeroshot-v2.0": "Apache-2.0"}
+# The base model's licence and what its own fine-tuning data was (for NOTICE.md).
+BASE_LICENSES = {
+    "MoritzLaurer/ModernBERT-large-zeroshot-v2.0":
+        "Apache-2.0; its zero-shot fine-tuning mix includes non-commercially licensed data (no '-c' variant exists)",
+    "MoritzLaurer/deberta-v3-large-zeroshot-v2.0-c":
+        "MIT; fine-tuned on MNLI, FEVER-NLI (CC-BY-SA-3.0) and Mixtral-generated synthetic data (no non-commercial data)",
+    "answerdotai/ModernBERT-large": "Apache-2.0; pretrained on web text, code and scientific articles",
+    "microsoft/deberta-v3-large": "MIT",
+}
 WEIGHT_SUFFIXES = (".safetensors", ".bin")
 
 

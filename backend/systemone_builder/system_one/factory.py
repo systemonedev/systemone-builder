@@ -7,10 +7,14 @@ from systemone_builder.adapters.factory import build_adapter
 from systemone_builder.config import Settings
 from systemone_builder.system_one.engines import JevEngine, LLMJsonEngine, LocalLogprobEngine, SystemOneEngine
 
-ENGINES = ("kenning", "jev", "local", "llm")
+ENGINES = ("kenning", "clef", "jev", "local", "llm")
 
 
 def build_engine(kind: str, s: Settings) -> SystemOneEngine:
+    if kind == "clef":
+        # Cloudflare Clef (Apache-2.0), served locally by kenning.clef_serve (compose profile "clef")
+        return JevEngine(None, base_url=s.clef_url, model="clef-flash", timeout_s=max(s.request_timeout_s, 120),
+                         require_key=False, name="clef-flash")
     if kind == "kenning":
         # Kenning (compose service "kenning") serves the System One wire format,
         # so the same HTTP client is reused, without a key

@@ -93,6 +93,8 @@ class Settings(BaseSettings):
     system_one_concurrency: int = 16
     # Kenning, the local System One model (compose service ``kenning``).
     kenning_url: str = "http://kenning:8000"
+    # Optional Cloudflare Clef server (compose profile "clef"): benchmark engine and teacher.
+    clef_url: str = "http://clef:8000"
     # Kenning's files: models/, datasets/, exports/, bench_cache/ and active.json.
     # Unset = <data_dir>/workspace/kenning (the shared workspace volume in compose).
     kenning_home: Path | None = None

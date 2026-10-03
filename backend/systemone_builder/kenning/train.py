@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import random
 import time
 from pathlib import Path
@@ -36,6 +37,23 @@ from systemone_builder.kenning.model import CONFIG_FILE, DEFAULT_BASE, TEMPLATE_
 
 
 # ------------------------------------------------------------------- data
+def micro_batches(groups: list[dict[str, Any]], max_pairs: int) -> list[list[dict[str, Any]]]:
+    """Split a step's groups into runs of at most ``max_pairs`` pairs (a group is never split)."""
+    out: list[list[dict[str, Any]]] = []
+    cur: list[dict[str, Any]] = []
+    n = 0
+    for g in groups:
+        k = len(g["hyps"])
+        if cur and n + k > max_pairs:
+            out.append(cur)
+            cur, n = [], 0
+        cur.append(g)
+        n += k
+    if cur:
+        out.append(cur)
+    return out
+
+
 def target_vector(q: Question, options: list[Any], target: Any) -> list[float]:
     n = len(options)
     if q.type == "noul":
@@ -150,6 +168,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--lr", type=float, default=1e-5)
     p.add_argument("--batch-groups", type=int, default=8, help="question groups per optimizer step")
     p.add_argument("--max-length", type=int, default=1024)
+    p.add_argument("--max-pairs", type=int, default=48,
+                   help="(state, answer) pairs per forward pass; a step is split into micro-batches of at most this "
+                        "many pairs (same gradient, bounded memory)")
     p.add_argument("--val-fraction", type=float, default=0.1)
     p.add_argument("--seed", type=int, default=13)
     p.add_argument("--no-grad-checkpointing", action="store_true", help="faster, but needs far more VRAM")
@@ -158,6 +179,9 @@ def main(argv: list[str] | None = None) -> int:
                         "instead of spilling into shared system memory (slow, and risky on WSL2). 0 = no cap")
     a = p.parse_args(argv)
 
+    # Before torch initialises CUDA: growable segments avoid the fragmentation that makes a
+    # capped process run out of memory with gigabytes reserved but unused.
+    os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
     import torch
     from transformers import AutoModelForSequenceClassification, AutoTokenizer, get_linear_schedule_with_warmup
 
@@ -196,31 +220,47 @@ def main(argv: list[str] | None = None) -> int:
         model.gradient_checkpointing_enable()
     model.train()
     t0 = time.time()
+    skipped = 0
     for step in range(steps):
         batch = order[step * a.batch_groups:(step + 1) * a.batch_groups]
-        premises = [g["premise"] for g in batch for _ in g["hyps"]]
-        hyps = [h for g in batch for h in g["hyps"]]
-        enc = tok(premises, hyps, truncation="only_first", max_length=a.max_length, padding=True,
-                  return_tensors="pt").to(device)
-        with torch.autocast(device_type="cuda", dtype=torch.bfloat16, enabled=device == "cuda"):
-            logits = model(**enc).logits
-        scores = pair_scores(model, logits, pos)
-        loss = torch.zeros((), device=device)
-        i = 0
-        for g in batch:
-            n = len(g["hyps"])
-            logp = torch.log_softmax(scores[i:i + n], dim=-1)
-            loss = loss - (torch.tensor(g["target"], device=device) * logp).sum()
-            i += n
-        loss = loss / len(batch)
-        loss.backward()
+        try:
+            total = 0.0
+            for micro in micro_batches(batch, a.max_pairs):
+                premises = [g["premise"] for g in micro for _ in g["hyps"]]
+                hyps = [h for g in micro for h in g["hyps"]]
+                enc = tok(premises, hyps, truncation="only_first", max_length=a.max_length, padding=True,
+                          return_tensors="pt").to(device)
+                with torch.autocast(device_type="cuda", dtype=torch.bfloat16, enabled=device == "cuda"):
+                    logits = model(**enc).logits
+                scores = pair_scores(model, logits, pos)
+                loss = torch.zeros((), device=device)
+                i = 0
+                for g in micro:
+                    n = len(g["hyps"])
+                    logp = torch.log_softmax(scores[i:i + n], dim=-1)
+                    loss = loss - (torch.tensor(g["target"], device=device) * logp).sum()
+                    i += n
+                # Same gradient as one big batch: every group is weighted 1/len(batch).
+                loss = loss / len(batch)
+                loss.backward()
+                total += loss.item()
+                del enc, logits, scores, loss
+        except torch.OutOfMemoryError:
+            # A rare oversized step (very long states x many options): skip it, don't lose the run.
+            opt.zero_grad(set_to_none=True)
+            torch.cuda.empty_cache()
+            skipped += 1
+            print(f"[kenning-train] step {step + 1}: out of memory, skipped ({skipped} so far)", flush=True)
+            if skipped > max(10, steps // 100):
+                raise SystemExit("[kenning-train] too many out-of-memory steps; lower --max-pairs or --max-length")
+            continue
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         opt.step()
         sched.step()
         opt.zero_grad(set_to_none=True)
         if step % 20 == 0 or step == steps - 1:
             peak = f", peak VRAM {torch.cuda.max_memory_allocated() / 2**30:.1f} GiB" if device == "cuda" else ""
-            print(f"[kenning-train] step {step + 1}/{steps} loss {loss.item():.4f} ({time.time() - t0:.0f}s{peak})", flush=True)
+            print(f"[kenning-train] step {step + 1}/{steps} loss {total:.4f} ({time.time() - t0:.0f}s{peak})", flush=True)
 
     after_raw_metrics, raw = evaluate(model, tok, val, pos, a.max_length, device)
     temps = fit_temperatures(raw)

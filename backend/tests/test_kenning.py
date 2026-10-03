@@ -12,7 +12,7 @@ from systemone_builder.system_one.contract import Question
 from systemone_builder.system_one.factory import api_engine, build_engine
 from systemone_builder.kenning.data import SAFE_OPTION, body_hash, excluded_hashes, questions_for
 from systemone_builder.kenning.model import hypotheses
-from systemone_builder.kenning.train import fit_temperatures, metrics, target_vector
+from systemone_builder.kenning.train import fit_temperatures, metrics, micro_batches, target_vector
 
 
 def q(**kw):
@@ -333,3 +333,46 @@ def test_nli_fiction_genre_is_excluded():
 
     ctx = _ctx()
     assert accept_nli({"genre": "government"}, ctx) and not accept_nli({"genre": "fiction"}, ctx)
+
+
+def test_distillation_blends_teacher_and_labels_and_reports_agreement(monkeypatch):
+    import httpx
+
+    from systemone_builder.kenning import distill
+
+    rows = [
+        {"source": "a", "state": "s1", "questions": {"q": {"type": "noul", "instructions": "x?"}}, "targets": {"q": 1}},
+        {"source": "a", "state": "s2", "questions": {"c": {"type": "choice", "instructions": "k?",
+                                                           "criteria": {"x": None, "y": None}}}, "targets": {"c": "x"}},
+    ]
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        reqs = json.loads(req.content)["requests"]
+        out = []
+        for r in reqs:
+            if "q" in r["questions"]:
+                out.append({"answers": {"q": {"type": "noul", "noul": 0.8}}})
+            else:
+                out.append({"answers": {"c": {"type": "choice", "choice": "y", "confidence": 0.6,
+                                              "probabilities": {"x": 0.4, "y": 0.6}}}})
+        return httpx.Response(200, json={"responses": out})
+
+    real = httpx.Client
+    monkeypatch.setattr(httpx, "Client", lambda **kw: real(transport=httpx.MockTransport(handler), **kw))
+    out, report = distill.label_rows(rows, "http://teacher", alpha=0.5)
+    assert out[0]["targets"]["q"] == pytest.approx(0.9)            # (1 + 0.8) / 2
+    assert out[1]["targets"]["c"] == pytest.approx({"x": 0.7, "y": 0.3})  # (1,0)/2 + (0.4,0.6)/2
+    assert out[0]["label_targets"] == {"q": 1}
+    assert report["a"]["questions"] == 2 and report["a"]["agree"] == 1  # agrees on q, not on c
+    for row in out:  # the blended targets still feed the trainer
+        for qid, qd in row["questions"].items():
+            qq = Question.model_validate(qd)
+            assert sum(target_vector(qq, hypotheses(qq)[1], row["targets"][qid])) == pytest.approx(1.0)
+
+
+def test_micro_batches_bound_pairs_and_keep_groups_whole():
+    groups = [{"hyps": ["h"] * k} for k in (5, 30, 20, 60, 2, 2)]
+    runs = micro_batches(groups, 48)
+    assert [g for run in runs for g in run] == groups  # order kept, nothing dropped
+    assert all(sum(len(g["hyps"]) for g in run) <= 48 or len(run) == 1 for run in runs)
+    assert [len(run) for run in runs] == [2, 1, 1, 2]  # an oversized group runs alone

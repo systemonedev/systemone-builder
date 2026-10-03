@@ -215,9 +215,106 @@ scenarios), was added:
 
 **Conclusions.** The clean base gives up the zero-shot training that carried v0.1/v0.2 on real data,
 and ~32k clean rows do not replace it. The calm-lure / legitimate-twin pairs help (1 lure auto-closed
-instead of 5), but teacher-written data alone does not reach real-world accuracy. v0.2 stays active.
+instead of 5), but teacher-written data alone does not reach real-world accuracy. v0.2 stayed active
+until v0.4 (below).
 **No Kenning version is fit yet to auto-close subtle modern phishing; keep a person in the loop.**
 
 Next candidates: a commercially-friendly zero-shot base (MoritzLaurer's `-c` models, e.g.
 `deberta-v3-large-zeroshot-v2.0-c`, trained only on permissively licensed data) with the v0.3 data,
 more and better subtle-phishing pairs (a stronger teacher), and a third held-out set.
+
+## Cloudflare Clef: benchmark engine and teacher
+
+[Clef](https://blog.cloudflare.com/clef-decision-models/) (Cloudflare, Apache-2.0 weights, Qwen
+base plus a joint schema head) speaks the same wire format. The builder runs it locally behind the
+optional compose profile `clef` (`systemone_builder.kenning.clef_serve`, which loads the model
+repository's own `joint_schema_model.py`):
+
+```bash
+docker compose stop student                      # Clef-flash needs most of a 24 GB GPU
+docker compose --profile clef up -d clef         # first start downloads ~19 GB
+docker compose exec api systemone bench --suite modern2 --engines kenning,clef
+```
+
+Clef-flash fits on one RTX 3090 (17.8 GiB loaded, ~24 GiB in use while labelling in batches of 8;
+batches of 16 overflowed into shared memory and ran 4x slower).
+
+| Suite | kenning-large-v0.2 | Clef-flash (local, RTX 3090) | TypeSafe Jev |
+|---|---|---|---|
+| Modern 2 (held out): accuracy / phishing auto-closed | 0.60 / 5 | 0.90 / 0 | 0.90 / 0 |
+| Modern | 0.90 | 1.00 | 1.00 |
+| Phishing (50): accuracy | 0.96 | 0.96 (all automated decisions correct) | 0.96 |
+| Layouts | 0.96–0.98 | 0.88–0.94 | 0.96 |
+| Out of domain: spam / emotion / news | 0.967 / 0.767 / 0.900 | 0.900 / 0.600 / 0.950 | 0.967 / 0.583 / 0.933 |
+| Latency p50, one at a time | 23–70 ms | 220–290 ms | ~150 ms |
+| GPU memory | ~1 GB | ~18 GB | – |
+
+### Distillation (`systemone label`)
+
+Clef's licence allows training on its outputs (TypeSafe's terms forbid it for Jev). `systemone
+label <data.jsonl>` sends rows to a teacher's `POST /v1/systemone/batch` and writes soft targets
+(probability of yes, or a distribution over options), blended with the existing labels by
+`--alpha` (0.5 = average). It also reports how often the teacher agrees with each source's labels:
+over the full v0.3 dataset (31,778 rows, Clef-flash, ~3 hours on one RTX 3090): amazon_polarity
+95.8%, clinc 95.0%, synthetic emails 84.6%, MNLI 82.6%, synthetic tasks 74.3% and civil_comments
+73.2%. Low agreement flags noise in the teacher-written data and the borderline toxicity labels.
+
+### kenning-large-v0.4: clean zero-shot base + Clef soft labels (active)
+
+v0.4 combines the two fixes v0.3 pointed to:
+- base `MoritzLaurer/deberta-v3-large-zeroshot-v2.0-c`: MIT, zero-shot NLI training with no
+  non-commercial data, though it includes FEVER-NLI (CC-BY-SA-3.0);
+- the v0.3 rows, with their labels averaged with Clef-flash's soft labels
+  (`systemone label --alpha 0.5`).
+
+```bash
+docker compose exec api systemone label /workspace/kenning/datasets/clean-v3-train.jsonl \
+  --out /workspace/kenning/datasets/clean-v3-train-clef.jsonl --alpha 0.5 --batch 8
+docker compose run --rm --no-deps kenning python -m systemone_builder.kenning.train \
+  --data /workspace/kenning/datasets/clean-v3-train-clef.jsonl --out /workspace/kenning/models/kenning-large-v0.4 \
+  --base MoritzLaurer/deberta-v3-large-zeroshot-v2.0-c --lr 1e-5 --epochs 1 --batch-groups 8 --max-length 512
+```
+
+1 epoch, 4,951 steps, ~1 h 55 min, peak 18.1 GiB. Held-out accuracy 0.670 (zero-shot) → 0.927;
+Brier 0.038; ECE 0.025 at T=1, 0.049 after temperature fitting. The first attempt ran out of memory at
+step 2,461 under the 0.85 VRAM cap: 3.2 GiB was reserved but unused, which is fragmentation. The
+trainer now splits each step into micro-batches of at most `--max-pairs` (state, answer) pairs. That
+gives the same gradient; the rerun matched the first run's loss at step 1,001 exactly. The trainer
+also uses expandable CUDA segments and skips (and logs) a step that still runs out of memory.
+
+| | v0.2 | v0.3 | **v0.4** | Clef-flash | TypeSafe Jev |
+|---|---|---|---|---|---|
+| **Modern 2 (20, held out): accuracy** | 0.60 | 0.65 | **0.75** | 0.90 | 0.90 |
+| **Modern 2: phishing auto-closed as safe** | 5 | 1 | **0** | 0 | 0 |
+| Modern (20) | 0.90 | 1.00 | 1.00 | 1.00 | 1.00 |
+| Phishing (50, real dataset) | 0.96 | 0.72 | 0.78 (category 0.82) | 0.96 | 0.96 |
+| Layouts | 0.96–0.98 | 0.66–0.74 | 0.76–0.78 | 0.88–0.94 | 0.96 |
+| Out of domain: spam / emotion / news | 0.967 / 0.767 / 0.900 | 0.617 / 0.550 / 0.767 | 0.917 / 0.583 / 0.867 | 0.900 / 0.600 / 0.950 | 0.967 / 0.583 / 0.933 |
+| Latency p50, one at a time | 23–70 ms | – | 33–70 ms | 220–290 ms | ~150 ms |
+
+**Reading the table.** The phishing and layout suites come from `zefang-liu/phishing-email-dataset`.
+v0.2 was trained on other emails from that dataset, so those suites are in-distribution for v0.2. The
+clean recipe leaves the dataset out because it is LGPL-3.0. On data no Kenning version was trained on
+(out of domain, Modern 2), v0.4 recovers most of what v0.3 lost:
+- **best Kenning yet on Modern 2**, and the first with **no phishing auto-closed** there;
+- across every suite, its automated decisions (p ≥ 0.9 or ≤ 0.1) were 100% correct except one spam
+  message auto-closed in the out-of-domain set;
+- it is more conservative: it automates 20–44% of items and sends the rest to a person or System 2.
+
+It is still well behind Clef and Jev on real phishing and on subtle lures.
+
+v0.4 is active: it is the first model built from the clean recipe that is safe to gate on. v0.2
+stays registered for comparison. Next: more real-looking calm-lure / legitimate-twin pairs, Clef
+labels at alpha 1.0 for the synthetic sources (where the teacher disagrees most with its own
+labels), and a permissively licensed real phishing corpus.
+
+## Licensing of the weights
+
+No pretrained language model has a lineage free of share-alike text (ModernBERT, DeBERTa and Qwen
+were pretrained on web data that includes Wikipedia). The bar Kenning follows:
+
+- no non-commercially licensed data anywhere in the lineage;
+- Kenning's own fine-tuning data permissively licensed (Apache-2.0, MIT, CC-BY, CC0, OANC) or
+  generated (Qwen2.5-7B-Instruct teacher, Clef soft labels, both Apache-2.0);
+- every upstream licence listed in the export bundle's `NOTICE.md`, share-alike ones included
+  (e.g. FEVER-NLI, CC-BY-SA-3.0, in the fine-tuning of the `-c` zero-shot bases).

@@ -225,6 +225,44 @@ services:
       retries: 30
     restart: "no"
 
+  # ---------------------- optional: Cloudflare Clef (Apache-2.0), teacher/benchmark
+  # Off by default: `docker compose --profile clef up -d clef`. Clef-flash is
+  # ~19 GB in bf16 and needs a 24 GB GPU to itself (stop the student first).
+  # Used by `systemone bench --engines clef` and `systemone label --engine clef`.
+  clef:
+    profiles: ["clef"]
+    image: systemone/kenning:latest
+    container_name: systemone-clef
+    command: ["python", "-m", "systemone_builder.kenning.clef_serve"]
+    environment:
+      CLEF_MODEL: ${S1_CLEF_MODEL:-Cloudflare/clef-flash}
+      CLEF_MAX_LENGTH: ${S1_CLEF_MAX_LENGTH:-4096}
+      HF_HOME: /workspace/hf_cache
+      HF_TOKEN: ${HF_TOKEN:-}
+      NVIDIA_VISIBLE_DEVICES: ${S1_CLEF_GPU:-0}
+      CUDA_VISIBLE_DEVICES: ${S1_CLEF_CUDA_DEVICE:-${S1_CLEF_GPU:-0}}
+      CUDA_DEVICE_ORDER: PCI_BUS_ID
+    volumes:
+      - ${S1_WORKSPACE_VOLUME:-systemone-workspace}:/workspace
+    ports:
+      - "127.0.0.1:${S1_CLEF_PORT:-8094}:8000"   # no auth: host-local only
+    mem_limit: ${S1_CLEF_MEM_LIMIT:-48g}
+    stop_signal: SIGTERM
+    stop_grace_period: 30s
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${S1_CLEF_GPU:-0}"]
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 15s
+      start_period: 1800s
+      retries: 40
+    restart: "no"
+
   # ------------------------------------------ GPU 1: Container C (triage)
   # Starts only after the student is healthy, so two engines never load
   # weights and allocate memory at the same time.
