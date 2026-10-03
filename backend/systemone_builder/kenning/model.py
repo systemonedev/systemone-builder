@@ -96,6 +96,19 @@ def read_config(path: str | os.PathLike[str]) -> dict[str, Any]:
     return {}
 
 
+def local_dir(path: str) -> str:
+    """A model directory on disk: ``path`` itself, or a Hugging Face repo id downloaded
+    (weights, tokenizer and kenning.json; the config is what makes it calibrated)."""
+    if Path(path).is_dir():
+        return path
+    from huggingface_hub import snapshot_download
+
+    snap = snapshot_download(path, allow_patterns=["*.json", "*.safetensors", "*.model", "*.txt"])
+    if not any(Path(snap).glob("*.safetensors")):  # older repos ship only PyTorch .bin weights
+        snap = snapshot_download(path, allow_patterns=["*.json", "*.bin", "*.model", "*.txt"])
+    return snap
+
+
 def entailment_index(model: Any) -> int:
     label2id = {k.lower(): v for k, v in (getattr(model.config, "label2id", None) or {}).items()}
     return int(label2id.get("entailment", 0))
@@ -111,13 +124,14 @@ class Kenning:
 
         make_deterministic()
         self.path = str(path)
-        self.config: dict[str, Any] = read_config(self.path)
+        local = local_dir(self.path)
+        self.config: dict[str, Any] = read_config(local)
         self.temperature: dict[str, float] = {"noul": 1.0, "choice": 1.0, "score": 1.0, **self.config.get("temperature", {})}
         self.name = self.config.get("name") or Path(self.path).name or self.path
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         dtype = torch.bfloat16 if self.device.startswith("cuda") else torch.float32
-        self.tokenizer = AutoTokenizer.from_pretrained(self.path)
-        self.model = AutoModelForSequenceClassification.from_pretrained(self.path, dtype=dtype).to(self.device).eval()
+        self.tokenizer = AutoTokenizer.from_pretrained(local)
+        self.model = AutoModelForSequenceClassification.from_pretrained(local, dtype=dtype).to(self.device).eval()
         self.positive_index = int(self.config.get("positive_index", entailment_index(self.model)))
         self.max_length = max_length or int(self.config.get("max_length", 2048))
         self.chunk = chunk

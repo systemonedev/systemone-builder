@@ -212,6 +212,32 @@ def cmd_label(a: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_publish(a: argparse.Namespace) -> int:
+    """Upload a trained Kenning model to the Hugging Face Hub (needs HF_TOKEN with write access)."""
+    import os
+
+    from systemone_builder.config import get_settings
+    from systemone_builder.kenning import registry
+
+    s = get_settings()
+    token = os.environ.get("HF_TOKEN")
+    if not token:
+        print("HF_TOKEN is not set (a Hugging Face token with write access to the target repo)")
+        return 2
+    repo = a.repo or f"{a.org}/{a.model}"
+    results = s.data_dir / "eval_results"
+    bench = registry.recorded_benchmarks(results, a.model)
+    print(f"publishing {a.model} to {repo} ({'private' if a.private else 'public'}); "
+          f"recorded benchmarks: {', '.join(sorted(bench)) or 'none'}")
+    try:
+        url = registry.publish(s.kenning_dir(), a.model, repo, token, results, a.private)
+    except registry.RegistryError as exc:
+        print(f"refused: {exc}")
+        return 1
+    print(f"published: {url}")
+    return 0
+
+
 def cmd_doctor(_: argparse.Namespace) -> int:
     """Check the local host against the reference topology."""
     from systemone_builder.adapters.byom import resolve
@@ -359,6 +385,12 @@ def main(argv: list[str] | None = None) -> int:
     lb.add_argument("--batch", type=int, default=16)
     lb.add_argument("--limit", type=int, help="only the first N rows (quick checks)")
     lb.set_defaults(fn=cmd_label)
+    pb = sub.add_parser("publish", help="upload a trained Kenning model to the Hugging Face Hub (Apache-2.0 models only)")
+    pb.add_argument("model", help="registered model name, e.g. kenning-large-v0.4")
+    pb.add_argument("--org", default="systemonedev", help="Hugging Face user or org (repo: <org>/<model>)")
+    pb.add_argument("--repo", help="full repo id, overriding --org")
+    pb.add_argument("--private", action="store_true")
+    pb.set_defaults(fn=cmd_publish)
     d.add_argument("--subtle-share", type=float, default=0.0,
                    help="share of synthetic emails drawn from calm-lure / legitimate-twin pairs")
     d.add_argument("--synthetic-tasks", type=int, default=0, metavar="N",

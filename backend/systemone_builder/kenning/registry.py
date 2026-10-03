@@ -37,6 +37,9 @@ BASE_LICENSES = {
 # are not released under Apache-2.0 (see weights_licence).
 NC_BASES = {"MoritzLaurer/ModernBERT-large-zeroshot-v2.0"}
 WEIGHTS_LICENCE = "apache-2.0"
+# Distillation teachers (``systemone label --teacher-name``): Hub id and licence of their outputs' source.
+TEACHERS = {"clef-flash": ("Cloudflare/clef-flash", "Apache-2.0")}
+INSTALL = 'pip install "systemone[local] @ git+https://github.com/systemonedev/systemone-builder#subdirectory=clients/python"'
 LICENCE_TEXT = Path(__file__).with_name("LICENSE-Apache-2.0.txt")
 WEIGHT_SUFFIXES = (".safetensors", ".bin")
 
@@ -143,11 +146,74 @@ def weights_licence(s: dict[str, Any]) -> tuple[str, str]:
                              "some are share-alike (CC-BY-SA-3.0), so keep NOTICE.md with the weights.")
 
 
+def _teacher_line(m: dict[str, Any] | None) -> str | None:
+    t = (m or {}).get("teacher")
+    if not t:
+        return None
+    hub, licence = TEACHERS.get(t.get("model", ""), (t.get("model", "unknown"), "see its model card"))
+    alpha = float(t.get("alpha", 1.0))
+    return (f"Distilled: every label was blended with the soft labels (probabilities) of `{hub}` ({licence}); "
+            f"the target is {1 - alpha:.0%} original label + {alpha:.0%} teacher.")
+
+
 def _pct(x: Any) -> str:
     return "–" if x is None else f"{x:.3f}"
 
 
-def model_card(name: str, s: dict[str, Any]) -> str:
+SUITE_NAMES = {"modern_email_2": "Modern emails 2 (held out)", "modern_email": "Modern emails",
+               "phishing": "Phishing dataset", "layouts": "Layouts (4 state shapes)", "ood": "Out of domain"}
+
+
+def recorded_benchmarks(results_dir: Path | None, name: str) -> dict[str, dict[str, Any]]:
+    """Latest ``systemone bench`` report per suite in which the Kenning engine served ``name``."""
+    out: dict[str, tuple[float, dict[str, Any]]] = {}
+    if not results_dir or not results_dir.is_dir():
+        return {}
+    for f in results_dir.glob("*bench-*.json"):
+        try:
+            d = json.loads(f.read_text())
+        except (OSError, json.JSONDecodeError):
+            continue
+        suite = (d.get("suite") or {}).get("name")
+        ts = d.get("ts") or f.stat().st_mtime
+        for r in d.get("reports") or []:
+            if r.get("engine") == "kenning" and r.get("model") == name and suite and ts > out.get(suite, (0.0, {}))[0]:
+                out[suite] = (ts, r)
+    return {k: v for k, (_, v) in out.items()}
+
+
+def _bench_lines(bench: dict[str, dict[str, Any]]) -> list[str]:
+    order = list(SUITE_NAMES) + sorted(set(bench) - set(SUITE_NAMES))
+    lines = ["## Benchmarks", "",
+             "Recorded with `systemone bench` on suites never used for training. *Automated* is the share of items "
+             "decided without a person (p >= 0.9 or <= 0.1); a *threat auto-closed* is a positive item the model was "
+             "sure was negative.", "",
+             "| Suite | Items | Accuracy | Brier | ECE | Automated | Threats auto-closed | Latency p50 |",
+             "|---|---|---|---|---|---|---|---|"]
+    for suite in order:
+        r = bench.get(suite)
+        if not r:
+            continue
+        qs = [q for q in (r.get("questions") or {}).values() if q.get("n")]
+        acc = " / ".join(f"{q['accuracy']:.3f}" for q in qs if q.get("accuracy") is not None)
+        gate = next((q["gate"] for q in qs if q.get("gate")), None)
+        brier = next((q["brier"] for q in qs if q.get("brier") is not None), None)
+        ece = next((q["ece"] for q in qs if q.get("ece") is not None), None)
+        p50 = (r.get("latency_ms") or {}).get("p50")
+        auto = f"{gate['automation_rate']:.0%}" if gate else "-"
+        closed = str(gate["false_negatives_closed"]) if gate else "-"
+        lat = f"{p50:.0f} ms" if p50 is not None else "-"
+        lines.append(f"| {SUITE_NAMES.get(suite, suite)} | {r.get('items')} | {acc or '-'} | {_pct(brier)} | "
+                     f"{_pct(ece)} | {auto} | {closed} | {lat} |")
+    lines += ["", "Where a suite asks several questions, accuracy lists each (out of domain: spam / emotion / news "
+              "topic; layouts: one per layout). Comparisons with Cloudflare Clef and TypeSafe Jev on the same suites "
+              "are in the [Kenning docs](https://github.com/systemonedev/systemone-builder/blob/main/docs/kenning.md).",
+              ""]
+    return lines
+
+
+def model_card(name: str, s: dict[str, Any], bench: dict[str, dict[str, Any]] | None = None,
+               repo_id: str | None = None) -> str:
     h = s["heldout"]
     base = s.get("base_model") or "unknown"
     spdx, licence_note = weights_licence(s)
@@ -183,6 +249,8 @@ def model_card(name: str, s: dict[str, Any]) -> str:
         lines += ["| Source | Rows | Licence |", "|---|---|---|"]
         for key, src in m.get("sources", {}).items():
             lines.append(f"| `{src.get('dataset', key)}` | {src.get('rows')} | {src.get('license')} |")
+        if _teacher_line(m):
+            lines += ["", _teacher_line(m)]
     else:
         lines.append(f"`{s.get('trained_on')}` (no manifest found)")
     lines += [
@@ -201,12 +269,17 @@ def model_card(name: str, s: dict[str, Any]) -> str:
         "These are in-distribution numbers. Benchmark on your own data (and recalibrate on a few hundred labelled "
         "examples from it) before letting the model act automatically.",
         "",
+        *(_bench_lines(bench) if bench else []),
         "## Use",
+        "",
+        "```bash",
+        INSTALL,
+        "```",
         "",
         "```python",
         "from systemone import Kenning, Noul, Choice",
         "",
-        f'model = Kenning.from_pretrained("./{name}")       # in-process, pip install "systemone[local]"',
+        f'model = Kenning.from_pretrained("{repo_id or "./" + name}")  # in-process, runs on CPU or GPU',
         'answer = model.system_one(state={"ticket": "I was charged twice."},',
         '                          questions={"billing": Noul("Is this about billing?")})',
         'print(answer.nouls["billing"].noul)',
@@ -242,10 +315,46 @@ def notice(s: dict[str, Any]) -> str:
     if m:
         lines += ["Fine-tuned on rows sampled from:", ""]
         for key, src in m.get("sources", {}).items():
-            lines.append(f"- `{src.get('dataset', key)}` ({src.get('config', '')} / {src.get('split', '')}), "
+            where = " / ".join(x for x in (src.get("config"), src.get("split")) if x)
+            lines.append(f"- `{src.get('dataset', key)}`{f' ({where})' if where else ''}, "
                          f"{src.get('rows')} rows - licence: {src.get('license')}")
+        if _teacher_line(m):
+            lines += ["", _teacher_line(m)]
     lines += ["", "Check each licence's terms (attribution, share-alike) before redistributing.", ""]
     return "\n".join(lines)
+
+
+def publish(home: Path, name: str, repo_id: str, token: str, results_dir: Path | None = None,
+            private: bool = False) -> str:
+    """Upload a model to the Hugging Face Hub with its card, LICENSE and NOTICE.md; returns the URL.
+
+    Only Apache-2.0 models (a clean lineage) are published; research-only ones are refused.
+    """
+    import tempfile
+
+    from huggingface_hub import HfApi
+
+    src = model_dir(home, name)
+    s = summary(home, name)
+    if weights_licence(s)[0] != WEIGHTS_LICENCE:
+        raise RegistryError(f"{name} is research-only (base {s.get('base_model')}): not publishing it")
+    if not s["has_weights"]:
+        raise RegistryError(f"{name} has no weights")
+    card = model_card(name, s, recorded_benchmarks(results_dir, name), repo_id)
+    api = HfApi(token=token)
+    url = api.create_repo(repo_id, repo_type="model", private=private, exist_ok=True)
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp)
+        for f in sorted(src.iterdir()):
+            if f.is_file() and not f.name.endswith(".part"):
+                shutil.copy2(f, out / f.name)
+        # LF everywhere: write_text would turn \n into \r\n on Windows
+        (out / "README.md").write_text(card, encoding="utf-8", newline="\n")
+        (out / "NOTICE.md").write_text(notice(s), encoding="utf-8", newline="\n")
+        (out / "LICENSE").write_text(LICENCE_TEXT.read_text(encoding="utf-8"), encoding="utf-8", newline="\n")
+        api.upload_folder(folder_path=str(out), repo_id=repo_id, repo_type="model",
+                          commit_message=f"Publish {name} (SystemOne Builder)")
+    return str(url)
 
 
 def export_bundle(home: Path, name: str) -> Path:

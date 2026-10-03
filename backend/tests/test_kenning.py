@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 import random
+from pathlib import Path
 
 import pytest
 
@@ -409,3 +410,85 @@ def test_pipeline_actions_are_refused_when_the_pipeline_is_off():
     assert exc.value.status_code == 409 and "S1_PIPELINE" in exc.value.detail
     rt = SimpleNamespace(settings=SimpleNamespace(pipeline=True))
     assert pipeline_on(rt) is rt
+
+
+def _clean_model(home, name):
+    d = _fake_model(home, name)
+    cfg = json.loads((d / "kenning.json").read_text())
+    cfg["base_model"] = "MoritzLaurer/deberta-v3-large-zeroshot-v2.0-c"
+    (d / "kenning.json").write_text(json.dumps(cfg))
+    return d
+
+
+def _bench_file(results, name, model, ts, accuracy):
+    results.mkdir(exist_ok=True)
+    report = {"engine": "kenning", "model": model, "items": 20, "latency_ms": {"p50": 34.0},
+              "questions": {"malicious": {"type": "noul", "n": 20, "accuracy": accuracy, "brier": 0.15, "ece": 0.19,
+                                          "gate": {"automation_rate": 0.2, "false_negatives_closed": 0}}}}
+    (results / name).write_text(json.dumps({"suite": {"name": "modern_email_2"}, "ts": ts, "reports": [report]}))
+
+
+def test_card_lists_the_models_latest_recorded_benchmarks(tmp_path):
+    from systemone_builder.kenning import registry
+
+    _clean_model(tmp_path, "kenning-c")
+    res = tmp_path / "eval_results"
+    _bench_file(res, "bench-modern_email_2-1.json", "kenning-c", 1.0, 0.70)
+    _bench_file(res, "bench-modern_email_2-2.json", "kenning-c", 2.0, 0.75)
+    _bench_file(res, "bench-modern_email_2-3.json", "other-model", 3.0, 0.99)  # another model: ignored
+    bench = registry.recorded_benchmarks(res, "kenning-c")
+    assert bench["modern_email_2"]["questions"]["malicious"]["accuracy"] == 0.75
+    card = registry.model_card("kenning-c", registry.summary(tmp_path, "kenning-c"), bench, "systemonedev/kenning-c")
+    assert "| Modern emails 2 (held out) | 20 | 0.750 | 0.150 | 0.190 | 20% | 0 | 34 ms |" in card
+    assert 'Kenning.from_pretrained("systemonedev/kenning-c")' in card
+
+
+def test_publish_uploads_clean_models_and_refuses_research_only_ones(tmp_path, monkeypatch):
+    import huggingface_hub
+
+    from systemone_builder.kenning import registry
+
+    uploads = {}
+
+    class FakeApi:
+        def __init__(self, token):
+            assert token == "hf_test"
+
+        def create_repo(self, repo_id, **kw):
+            uploads["repo"] = (repo_id, kw["private"])
+            return f"https://huggingface.co/{repo_id}"
+
+        def upload_folder(self, folder_path, repo_id, **kw):
+            uploads["files"] = {p.name: p.read_bytes() for p in Path(folder_path).iterdir()}
+
+    monkeypatch.setattr(huggingface_hub, "HfApi", FakeApi)
+    _fake_model(tmp_path, "kenning-nc")  # ModernBERT-zeroshot base: non-commercial data in its lineage
+    with pytest.raises(registry.RegistryError, match="research-only"):
+        registry.publish(tmp_path, "kenning-nc", "systemonedev/kenning-nc", "hf_test")
+    assert uploads == {}
+    _clean_model(tmp_path, "kenning-c")
+    url = registry.publish(tmp_path, "kenning-c", "systemonedev/kenning-c", "hf_test")
+    assert url == "https://huggingface.co/systemonedev/kenning-c" and uploads["repo"] == ("systemonedev/kenning-c", False)
+    files = uploads["files"]
+    assert {"model.safetensors", "kenning.json", "README.md", "NOTICE.md", "LICENSE"} <= set(files)
+    assert files["README.md"].startswith(b"---\nlicense: apache-2.0\n") and b"Apache License" in files["LICENSE"]
+
+
+def test_loader_uses_a_local_directory_as_is(tmp_path):
+    from systemone_builder.kenning.model import local_dir
+
+    assert local_dir(str(tmp_path)) == str(tmp_path)
+
+
+def test_card_and_notice_credit_the_distillation_teacher(tmp_path):
+    from systemone_builder.kenning import registry
+
+    _clean_model(tmp_path, "kenning-c")
+    (tmp_path / "datasets").mkdir()
+    (tmp_path / "datasets" / "multitask-train.manifest.json").write_text(json.dumps({
+        "sources": {"synth": {"dataset": "synthetic", "rows": 5, "license": "generated"}},
+        "teacher": {"model": "clef-flash", "alpha": 0.5}}))
+    s = registry.summary(tmp_path, "kenning-c")
+    for text in (registry.model_card("kenning-c", s), registry.notice(s)):
+        assert "`Cloudflare/clef-flash` (Apache-2.0)" in text and "50% original label + 50% teacher" in text
+    assert "( / )" not in registry.notice(s)

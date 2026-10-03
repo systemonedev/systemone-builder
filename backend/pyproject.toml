@@ -19,6 +19,7 @@ dependencies = [
   "nvidia-ml-py>=12.535",
   "pyyaml>=6.0",
   "jsonschema>=4.21",
+  "huggingface_hub>=0.24",  # systemone publish
 ]
 
 [project.optional-dependencies]

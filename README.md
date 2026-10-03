@@ -59,9 +59,10 @@ print(answer.nouls["billing"].noul)        # 0.93
 
 Out of the box, Kenning serves a zero-shot base model with no non-commercial data in its lineage,
 [`deberta-v3-large-zeroshot-v2.0-c`](https://huggingface.co/MoritzLaurer/deberta-v3-large-zeroshot-v2.0-c)
-(MIT). Trained Kenning weights (Apache-2.0) will be published at
-[huggingface.co/systemonedev](https://huggingface.co/systemonedev). Until then, the
-recipe below rebuilds them.
+(MIT). The trained flagship is published under Apache-2.0:
+[**systemonedev/kenning-large-v0.4**](https://huggingface.co/systemonedev/kenning-large-v0.4). Serve it with
+`S1_KENNING_MODEL=systemonedev/kenning-large-v0.4` in `.env`, or load it in-process with
+`Kenning.from_pretrained("systemonedev/kenning-large-v0.4")`.
 
 ## Kenning results
 
@@ -90,6 +91,7 @@ docker compose exec api systemone label /workspace/kenning/datasets/<rows>.jsonl
 docker compose run --rm --no-deps kenning python -m systemone_builder.kenning.train \
   --data /workspace/kenning/datasets/<rows>.jsonl --out /workspace/kenning/models/my-model
 docker compose exec api systemone bench --suite modern2 --engines kenning,clef
+docker compose exec api systemone publish my-model --org <your-hf-org>              # share it (Apache-2.0 models)
 ```
 
 Training fits in 24 GB. A run on ~30k rows takes 40 minutes to 2 hours on an RTX 3090.

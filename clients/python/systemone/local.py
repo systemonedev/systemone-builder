@@ -61,6 +61,19 @@ def hypotheses(q: dict[str, Any]) -> tuple[list[str], list[Any]]:
     return [f"{stem} Answer: {describe(lv)}." for lv in crit], list(crit)
 
 
+def local_dir(path: str) -> str:
+    """A model directory on disk: ``path`` itself, or a Hugging Face repo id downloaded
+    (weights, tokenizer and kenning.json; the config is what makes it calibrated)."""
+    if Path(path).is_dir():
+        return path
+    from huggingface_hub import snapshot_download
+
+    snap = snapshot_download(path, allow_patterns=["*.json", "*.safetensors", "*.model", "*.txt"])
+    if not any(Path(snap).glob("*.safetensors")):  # older repos ship only PyTorch .bin weights
+        snap = snapshot_download(path, allow_patterns=["*.json", "*.bin", "*.model", "*.txt"])
+    return snap
+
+
 def spread_confidence(probs: list[float]) -> float:
     n = len(probs)
     if n < 2:
@@ -91,9 +104,10 @@ class Kenning:
         torch.use_deterministic_algorithms(True, warn_only=True)
         self._torch = torch
         self.path = str(path)
+        local = local_dir(self.path)
         self.config: dict[str, Any] = {}
         for name in CONFIG_FILES:
-            f = Path(self.path) / name
+            f = Path(local) / name
             if f.exists():
                 self.config = json.loads(f.read_text())
                 break
@@ -101,8 +115,8 @@ class Kenning:
         self.name = self.config.get("name") or Path(self.path).name
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         dtype = torch.bfloat16 if self.device.startswith("cuda") else torch.float32
-        self.tokenizer = AutoTokenizer.from_pretrained(self.path)
-        self.model = AutoModelForSequenceClassification.from_pretrained(self.path, dtype=dtype).to(self.device).eval()
+        self.tokenizer = AutoTokenizer.from_pretrained(local)
+        self.model = AutoModelForSequenceClassification.from_pretrained(local, dtype=dtype).to(self.device).eval()
         label2id = {k.lower(): v for k, v in (getattr(self.model.config, "label2id", None) or {}).items()}
         self.positive_index = int(self.config.get("positive_index", label2id.get("entailment", 0)))
         self.max_length = max_length or int(self.config.get("max_length", 2048))
@@ -111,6 +125,7 @@ class Kenning:
 
     @classmethod
     def from_pretrained(cls, path: str | os.PathLike[str], **kw: Any) -> "Kenning":
+        """A model directory or a Hugging Face repo id, e.g. "systemonedev/kenning-large-v0.4"."""
         return cls(path, **kw)
 
     def _scores(self, premise: str, hyps: list[str]) -> tuple[list[float], int]:

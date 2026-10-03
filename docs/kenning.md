@@ -325,6 +325,24 @@ stays registered for comparison. Next: more real-looking calm-lure / legitimate-
 labels at alpha 1.0 for the synthetic sources (where the teacher disagrees most with its own
 labels), and a permissively licensed real phishing corpus.
 
+## Publishing to Hugging Face (`systemone publish`)
+
+```bash
+docker compose exec api systemone publish kenning-large-v0.4             # -> huggingface.co/systemonedev/kenning-large-v0.4
+docker compose exec api systemone publish my-model --org my-hf-org --private
+```
+
+Uploads the weights, tokenizer and `kenning.json`, plus:
+- a model card with Hugging Face metadata, the training data and its licences, the distillation teacher,
+  the held-out results, and a **Benchmarks** table. The table lists the latest `systemone bench` run per
+  suite in which Kenning served that exact model, so run the suites after activating it;
+- `LICENSE` (Apache-2.0) and `NOTICE.md`.
+
+It needs `HF_TOKEN` (in `.env`) with write access to the target repo. It refuses research-only models
+(a base with non-commercial data in its lineage). A published model loads anywhere with
+`Kenning.from_pretrained("systemonedev/kenning-large-v0.4")` or `S1_KENNING_MODEL=systemonedev/kenning-large-v0.4`.
+Both download the repo, including `kenning.json`, so the calibration comes with it.
+
 ## Licensing of the weights
 
 No pretrained language model has a lineage free of share-alike text (ModernBERT, DeBERTa and Qwen
