@@ -3,7 +3,7 @@
 #   docker compose run --rm --no-deps kenning python -m systemone_builder.kenning.train ...
 # and, with the "clef" profile, Cloudflare's Clef (systemone_builder.kenning.clef_serve).
 # Same base as the trainer image, so the CUDA/PyTorch layers are shared.
-FROM pytorch/pytorch:2.7.1-cuda12.8-cudnn9-devel
+FROM pytorch/pytorch:2.7.1-cuda12.8-cudnn9-runtime
 
 ENV PYTHONUNBUFFERED=1 HF_HOME=/workspace/hf_cache CUBLAS_WORKSPACE_CONFIG=:4096:8
 RUN pip install --no-cache-dir "transformers>=4.48,<6" safetensors \
