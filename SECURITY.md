@@ -7,8 +7,9 @@ should not as a security issue.
 ## Reporting a vulnerability
 
 Please **do not open a public issue** for a vulnerability. Use GitHub's private
-vulnerability reporting ("Security" tab → "Report a vulnerability") on this repository.
-Include what you found, how to reproduce it, and the version or commit.
+vulnerability reporting ("Security" tab → "Report a vulnerability") on this repository, or
+email **systemonedev@gmail.com** with "SECURITY" in the subject. Include what you found, how to
+reproduce it, and the version or commit.
 
 We aim to acknowledge reports within 3 working days and to agree on a fix and disclosure
 timeline with you. We credit reporters in the release notes unless you prefer otherwise.

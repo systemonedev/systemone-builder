@@ -10,6 +10,6 @@ tolerated.
 
 ## Reporting
 
-Report unacceptable behaviour privately to the maintainers at **conduct@systemone.dev**.
+Report unacceptable behaviour privately to the maintainers at **systemonedev@gmail.com**.
 Reports are handled confidentially. Maintainers who do not follow the code of conduct
 may face the same consequences as anyone else.
