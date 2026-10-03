@@ -92,8 +92,8 @@ r.model, r.latency_ms               # which model answered, and how fast
 All questions in one call are answered together, in one pass over the state. Ask everything you need
 in a single request rather than one request per question.
 
-**`state`** is whatever describes the situation: a string, or JSON (dicts, lists, numbers). Pass your
-real structured data as it is; you don't need to write a prompt. Keep it focused: models read a
+**`state`** is whatever describes the situation: a string, or a JSON object (a dict; wrap lists and
+other values in one). Pass your real structured data as it is; you don't need to write a prompt. Keep it focused: models read a
 limited number of tokens (Kenning: 512 per question/answer pair), so send the fields that matter.
 
 ## Questions
