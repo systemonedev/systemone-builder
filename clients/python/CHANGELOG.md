@@ -3,7 +3,7 @@
 All notable changes to the `systemone` package. Versions follow [SemVer](https://semver.org); until
 1.0, minor versions may change the API.
 
-## 0.1.0 - unreleased
+## 0.1.0 - 2026-10-03
 
 First release, published as `systemone-client` (`system-one` is an unrelated project); the import
 name is `systemone`.
