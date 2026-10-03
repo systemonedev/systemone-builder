@@ -35,6 +35,7 @@ include = ["systemone*"]
 [tool.setuptools.package-data]
 "systemone_builder.templates" = ["*.json"]
 "systemone_builder.system_one" = ["suites/*.jsonl", "suites/*.json"]
+"systemone_builder.kenning" = ["LICENSE-Apache-2.0.txt"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

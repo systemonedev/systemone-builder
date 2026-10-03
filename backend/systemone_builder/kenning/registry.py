@@ -33,6 +33,11 @@ BASE_LICENSES = {
     "answerdotai/ModernBERT-large": "Apache-2.0; pretrained on web text, code and scientific articles",
     "microsoft/deberta-v3-large": "MIT",
 }
+# Bases whose own fine-tuning used non-commercially licensed data: models built on them
+# are not released under Apache-2.0 (see weights_licence).
+NC_BASES = {"MoritzLaurer/ModernBERT-large-zeroshot-v2.0"}
+WEIGHTS_LICENCE = "apache-2.0"
+LICENCE_TEXT = Path(__file__).with_name("LICENSE-Apache-2.0.txt")
 WEIGHT_SUFFIXES = (".safetensors", ".bin")
 
 
@@ -125,6 +130,19 @@ def delete_model(home: Path, name: str) -> None:
 
 
 # ------------------------------------------------------------------ export
+def weights_licence(s: dict[str, Any]) -> tuple[str, str]:
+    """(Hugging Face licence id, sentence for the card) for a model's weights."""
+    base = s.get("base_model") or "unknown"
+    if base in NC_BASES:
+        return "other", (f"**Not released under Apache-2.0.** The base model `{base}` was fine-tuned on data that "
+                         "includes non-commercially licensed sets, so these weights are for research and evaluation; "
+                         "rebuild on a clean base (e.g. `MoritzLaurer/deberta-v3-large-zeroshot-v2.0-c`) to "
+                         "redistribute.")
+    return WEIGHTS_LICENCE, ("The weights are released under the **Apache License 2.0** (LICENSE). Upstream "
+                             "licences of the base model and of every training source are listed in NOTICE.md; "
+                             "some are share-alike (CC-BY-SA-3.0), so keep NOTICE.md with the weights.")
+
+
 def _pct(x: Any) -> str:
     return "–" if x is None else f"{x:.3f}"
 
@@ -132,7 +150,15 @@ def _pct(x: Any) -> str:
 def model_card(name: str, s: dict[str, Any]) -> str:
     h = s["heldout"]
     base = s.get("base_model") or "unknown"
+    spdx, licence_note = weights_licence(s)
     lines = [
+        "---",
+        f"license: {spdx}",
+        f"base_model: {base}",
+        "pipeline_tag: zero-shot-classification",
+        "tags: [system-one, kenning, decision-model, calibrated]",
+        "---",
+        "",
         f"# {s.get('display_name') or name}",
         "",
         "Kenning is a **System One** decision model: given program state and typed questions "
@@ -199,8 +225,7 @@ def model_card(name: str, s: dict[str, Any]) -> str:
         "",
         "## Licence",
         "",
-        "**Weights licence: not yet chosen by the publisher.** See NOTICE.md for the licences of the base model and "
-        "of every training source (some are CC-BY-SA-3.0) before redistributing these weights.",
+        licence_note,
         "",
         "Kenning implements a wire format compatible with TypeSafe AI's System One API. It is not affiliated with "
         "or endorsed by TypeSafe AI, and was not trained on TypeSafe outputs.",
@@ -227,7 +252,8 @@ def export_bundle(home: Path, name: str) -> Path:
     """Build (or reuse) ``exports/<name>.zip`` and return its path."""
     src = model_dir(home, name)
     out = home / "exports" / f"{name}.zip"
-    newest = max(f.stat().st_mtime for f in src.rglob("*") if f.is_file())
+    # rebuilt when the model or the card/NOTICE generator (this file) is newer than the bundle
+    newest = max([f.stat().st_mtime for f in src.rglob("*") if f.is_file()] + [Path(__file__).stat().st_mtime])
     if out.exists() and out.stat().st_mtime > newest:
         return out
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -248,6 +274,8 @@ def export_bundle(home: Path, name: str) -> Path:
             z.writestr(f"{name}/{CONFIG_FILE}", (src / "s1_config.json").read_text())
         z.writestr(f"{name}/README.md", model_card(name, s))
         z.writestr(f"{name}/NOTICE.md", notice(s))
+        if weights_licence(s)[0] == WEIGHTS_LICENCE and LICENCE_TEXT.exists():
+            z.writestr(f"{name}/LICENSE", LICENCE_TEXT.read_text(encoding="utf-8"))
         z.writestr(f"{name}/SHA256SUMS", "\n".join(sums) + "\n")
     tmp.replace(out)
     return out

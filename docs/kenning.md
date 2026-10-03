@@ -319,3 +319,15 @@ were pretrained on web data that includes Wikipedia). The bar Kenning follows:
   generated (Qwen2.5-7B-Instruct teacher, Clef soft labels, both Apache-2.0);
 - every upstream licence listed in the export bundle's `NOTICE.md`, share-alike ones included
   (e.g. FEVER-NLI, CC-BY-SA-3.0, in the fine-tuning of the `-c` zero-shot bases).
+
+**Kenning weights are released under Apache-2.0**, the same licence as the code. The export bundle
+carries the licence text (`LICENSE`), a model card whose metadata says `license: apache-2.0`, and
+`NOTICE.md`; keep `NOTICE.md` with the weights. The Apache-2.0 release applies to models with a clean
+lineage (v0.3 and later). A model on a base whose own fine-tuning used non-commercially licensed
+data (`MoritzLaurer/ModernBERT-large-zeroshot-v2.0`: v0.1, v0.2) is exported with `license: other`
+and a research-and-evaluation note instead (`registry.NC_BASES`).
+
+Upstream share-alike terms are not settled law for model weights: CC's guidance says they *may*
+apply to a model trained on the material. Listing those sources in `NOTICE.md` and keeping the
+training mix free of non-commercial data is the project's good-faith position. It is not legal
+advice.

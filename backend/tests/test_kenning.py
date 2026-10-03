@@ -206,11 +206,30 @@ def test_export_bundle_has_card_notice_and_checksums(tmp_path):
         assert {"kenning-a/model.safetensors", "kenning-a/kenning.json", "kenning-a/README.md",
                 "kenning-a/NOTICE.md", "kenning-a/SHA256SUMS"} <= names
         card = z.read("kenning-a/README.md").decode()
-        assert "google/boolq" in card and "not yet chosen" in card and "not affiliated" in card
+        assert "google/boolq" in card and "not affiliated" in card
+        # the fake model sits on a base with non-commercial fine-tuning data: no Apache-2.0
+        assert "license: other" in card and "Not released under Apache-2.0" in card
+        assert "kenning-a/LICENSE" not in names
         assert "CC-BY-SA-3.0" in z.read("kenning-a/NOTICE.md").decode()
         sums = dict(line.split("  ")[::-1] for line in z.read("kenning-a/SHA256SUMS").decode().split("\n") if line)
         assert sums["kenning-a/model.safetensors"] == hashlib.sha256(z.read("kenning-a/model.safetensors")).hexdigest()
     assert registry.export_bundle(tmp_path, "kenning-a") == out  # reused while the model is unchanged
+
+
+def test_clean_base_bundle_is_apache_2_with_licence_text(tmp_path):
+    import zipfile
+
+    from systemone_builder.kenning import registry
+
+    d = _fake_model(tmp_path, "kenning-c")
+    cfg = json.loads((d / "kenning.json").read_text())
+    cfg["base_model"] = "MoritzLaurer/deberta-v3-large-zeroshot-v2.0-c"
+    (d / "kenning.json").write_text(json.dumps(cfg))
+    with zipfile.ZipFile(registry.export_bundle(tmp_path, "kenning-c")) as z:
+        card = z.read("kenning-c/README.md").decode()
+        assert card.startswith("---\nlicense: apache-2.0\n") and "Apache License 2.0" in card
+        assert "Apache License" in z.read("kenning-c/LICENSE").decode()
+        assert "MIT" in z.read("kenning-c/NOTICE.md").decode()
 
 
 def test_server_only_loads_registered_models(tmp_path, monkeypatch):

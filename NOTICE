@@ -3,9 +3,11 @@ Copyright 2026 Jesus Rodriguez and SystemOne Builder contributors
 
 This product is licensed under the Apache License, Version 2.0 (see LICENSE).
 
-Model weights are not part of this source distribution. Models you download or train
-carry their own licences. Each Kenning export bundle includes a NOTICE.md listing the
-base model and every training source with its licence.
+Kenning model weights are released under the Apache License, Version 2.0, and are not part
+of this source distribution. Each Kenning export bundle includes the licence text and a
+NOTICE.md listing the base model and every training source with its licence (some are
+share-alike, e.g. CC-BY-SA-3.0). Models built on a base whose fine-tuning used
+non-commercially licensed data are marked as not Apache-2.0.
 
 Kenning implements a wire format compatible with TypeSafe AI's System One API. This
 project is not affiliated with or endorsed by TypeSafe AI, and its models are not trained
