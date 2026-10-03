@@ -11,6 +11,12 @@ requires-python = ">=3.10"
 license = { text = "Apache-2.0" }
 dependencies = ["httpx>=0.27"]
 keywords = ["system one", "decision model", "kenning", "calibration", "classification"]
+authors = [{ name = "Jesus Rodriguez" }, { name = "SystemOne Builder contributors" }]
+
+[project.urls]
+Homepage = "https://systemone.dev"
+Source = "https://github.com/systemonedev/systemone-builder"
+Models = "https://huggingface.co/systemonedev"
 
 [project.optional-dependencies]
 # run an exported Kenning bundle in-process, without a server

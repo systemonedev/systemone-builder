@@ -164,7 +164,7 @@ def model_card(name: str, s: dict[str, Any]) -> str:
         "Kenning is a **System One** decision model: given program state and typed questions "
         "(`noul` yes/no, `choice`, `score`) it returns typed answers with calibrated probabilities in one "
         "forward pass. It does not generate text. It was built with "
-        "[SystemOne Builder](https://github.com/jesusdrodriguez/systemone-builder).",
+        "[SystemOne Builder](https://github.com/systemonedev/systemone-builder).",
         "",
         "## Model",
         "",

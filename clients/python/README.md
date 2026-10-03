@@ -4,7 +4,7 @@ Python client for **System One** decision models such as **Kenning**: ask typed 
 program state, get typed answers with calibrated probabilities. No text generation, no parsing.
 
 ```bash
-pip install "systemone @ git+https://github.com/jesusdrodriguez/systemone-builder#subdirectory=clients/python"
+pip install "systemone @ git+https://github.com/systemonedev/systemone-builder#subdirectory=clients/python"
 pip install "systemone[local] @ git+..."   # + torch/transformers, to run an exported model in-process
 ```
 

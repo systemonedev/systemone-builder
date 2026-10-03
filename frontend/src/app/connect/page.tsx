@@ -5,7 +5,7 @@ import { Button, Card, PageTitle } from "@/components/ui";
 import { usePoll } from "@/utils/hooks";
 import type { KenningStatus } from "@/utils/kenning";
 
-const REPO = "https://github.com/jesusdrodriguez/systemone-builder";
+const REPO = "https://github.com/systemonedev/systemone-builder";
 
 function Snippet({ title, lang, code, note }: { title: string; lang: string; code: string; note?: string }) {
   const [copied, setCopied] = useState(false);

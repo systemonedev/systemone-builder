@@ -59,7 +59,8 @@ print(answer.nouls["billing"].noul)        # 0.93
 
 Out of the box, Kenning serves a zero-shot base model with no non-commercial data in its lineage,
 [`deberta-v3-large-zeroshot-v2.0-c`](https://huggingface.co/MoritzLaurer/deberta-v3-large-zeroshot-v2.0-c)
-(MIT). Trained Kenning weights (Apache-2.0) will be published on Hugging Face. Until then, the
+(MIT). Trained Kenning weights (Apache-2.0) will be published at
+[huggingface.co/systemonedev](https://huggingface.co/systemonedev). Until then, the
 recipe below rebuilds them.
 
 ## Kenning results
@@ -145,7 +146,8 @@ and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
 Code and Kenning weights: Apache-2.0 ([LICENSE](LICENSE), [NOTICE](NOTICE)). Each exported model
 ships with its licence and a `NOTICE.md` listing the base model and every training source with
 their licences. Models built on a base with non-commercial training data are marked as not
-Apache-2.0. Created by [Jesus Rodriguez](https://github.com/jesusdrodriguez).
+Apache-2.0. Created by [Jesus Rodriguez](https://github.com/jesusdrodriguez); maintained by
+[systemonedev](https://github.com/systemonedev) ([systemone.dev](https://systemone.dev)).
 
 The System One category and wire format were introduced by TypeSafe AI with Jev. SystemOne Builder
 implements a compatible format, is not affiliated with or endorsed by TypeSafe AI, and does not
