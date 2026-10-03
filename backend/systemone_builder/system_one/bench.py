@@ -251,7 +251,7 @@ async def run_engine(engine: SystemOneEngine, suite: Suite, concurrency: int) ->
             try:
                 resp = await engine.answer(req)
                 return {"id": item.id, "answers": {k: a.model_dump() for k, a in resp.answers.items()},
-                        "latency_ms": resp.latency_ms or (time.perf_counter() - t0) * 1000, "error": None}
+                        "model": resp.model, "latency_ms": resp.latency_ms or (time.perf_counter() - t0) * 1000, "error": None}
             except (EngineError, AdapterError, httpx.HTTPError, ValueError) as exc:
                 return {"id": item.id, "answers": None, "latency_ms": (time.perf_counter() - t0) * 1000,
                         "error": str(exc)}
@@ -345,8 +345,11 @@ def engine_report(name: str, suite: Suite, results: list[dict[str, Any]], wall_s
         return lat[min(len(lat) - 1, math.ceil(p * len(lat)) - 1)] if lat else None
 
     errors = [r["error"] for r in results if r["error"]]
+    models = sorted({r["model"] for r in ok if r.get("model")})
     return {
         "engine": name,
+        # what the engine served (e.g. kenning-large-v0.4), so runs can be compared later
+        "model": models[0] if len(models) == 1 else ", ".join(models) or None,
         "items": len(results), "errors": len(errors), "error_examples": sorted(set(errors))[:3],
         "latency_ms": {"p50": pct(0.5), "p95": pct(0.95), "mean": statistics.fmean(lat) if lat else None},
         "wall_s": wall_s, "throughput_per_s": len(results) / wall_s if wall_s else None,

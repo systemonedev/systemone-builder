@@ -41,6 +41,22 @@ In the dashboard:
   a Hugging Face cross-encoder id, default the zero-shot base) is served. **Export** builds a zip
   with the weights, tokenizer, `kenning.json`, a model card, `NOTICE.md` with the licences of the
   base model and every training source, and `SHA256SUMS`.
+- **Train** runs the whole recipe without a terminal:
+  - **1 · Training data** builds a dataset from the public sources (`systemone data`; the defaults
+    are the clean-licence recipe) and lists every dataset with its sources and licences.
+  - **2 · Label with a teacher** distils Clef's probabilities into a dataset (`systemone label`)
+    when the `clef` profile is running.
+  - **3 · Train** fine-tunes a base model (the recommended base is MIT with no non-commercial
+    data).
+  - Jobs run one at a time, with live logs and progress.
+  - A job that needs the GPU pauses the services on it (Kenning; the student with the pipeline;
+    Clef when it isn't the teacher), waits until enough VRAM is free (`S1_KENNING_TRAIN_FREE_MB`,
+    default 19500), and restarts them when it ends, whether it succeeds, fails or is cancelled.
+- **Verify** benchmarks the active model on the held-out suites against Clef, Jev (opt-in, you
+  confirm that each item is a paid request) or the pipeline's LLM read-out.
+  - The **scoreboard** shows the latest result per suite and model: accuracy, how much the model
+    would decide on its own, and how many threats it was sure were harmless.
+  - **Runs** opens any past run item by item, filtered to the mistakes.
 - **Try it** asks your own questions about any text or JSON, shows the probabilities, checks
   determinism (Run 10×), and can compare with TypeSafe Jev when you set `TYPESAFE_API_KEY` (each
   comparison is a paid TypeSafe request under your own TypeSafe agreement; off by default).

@@ -19,6 +19,7 @@ from systemone_builder.datastore.store import JsonStore, create_redis
 from systemone_builder.domains.registry import DomainRegistry
 from systemone_builder.extraction.pipeline import StateExtractor
 from systemone_builder.extraction.prompt import PrefixTracker
+from systemone_builder.kenning.jobs import KenningJobs
 from systemone_builder.orchestrator.docker_ctl import DockerController
 from systemone_builder.orchestrator.gpu import create_gpu_monitor
 from systemone_builder.orchestrator.hardware import HardwareOrchestrator
@@ -105,6 +106,7 @@ class Runtime:
         self.telemetry = TelemetryCollector(self.bus, self.gpu, self.student, self.triage, settings.telemetry_interval_s)
         self.workflows = WorkflowEngine(self.oracle, self.store)
         self.services = ServiceMonitor(self)
+        self.kenning_jobs = KenningJobs(self)
 
     def _build_phase5(self) -> None:
         s = self.settings
@@ -193,6 +195,7 @@ class Runtime:
         await self._load_calibrations()
         self.escalations.start()
         self.telemetry.start()
+        self.kenning_jobs.reconcile()
         if not self.settings.pipeline:
             log.info("pipeline off (S1_PIPELINE): Kenning-only; not managing the student or the data factory")
             return

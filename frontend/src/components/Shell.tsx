@@ -15,6 +15,8 @@ const NAV: { section: string; hint?: string; pipeline?: boolean; items: { href: 
     items: [
       { href: "/", label: "Overview" },
       { href: "/models", label: "Models" },
+      { href: "/train", label: "Train" },
+      { href: "/verify", label: "Verify" },
       { href: "/try", label: "Try it" },
       { href: "/connect", label: "Connect" },
     ],

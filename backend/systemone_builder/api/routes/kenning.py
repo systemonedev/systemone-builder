@@ -7,6 +7,15 @@
     DELETE /kenning/models/{name}           delete (not the active one)
     POST   /kenning/models/{name}/export    build the export bundle, return its metadata
     GET    /kenning/models/{name}/export    download the bundle (built on demand)
+    GET    /kenning/bases                   base models for training, with their licences
+    GET    /kenning/datasets                training sets (rows, sources, licences, teacher)
+    GET    /kenning/clef                    whether the optional Clef teacher is running
+    GET    /kenning/jobs                    data / label / train / bench jobs (newest first)
+    POST   /kenning/jobs                    start one: {kind, params} (one at a time)
+    GET    /kenning/jobs/{id}               one job with its log tail
+    POST   /kenning/jobs/{id}/cancel        stop it (paused services are restarted)
+    GET    /kenning/bench/results           benchmark runs (summaries)
+    GET    /kenning/bench/results/{file}    one run with per-item answers
     GET    /systemone/engines               which engines can answer here
     POST   /systemone/compare               one request on several engines, side by side
 """
@@ -14,6 +23,8 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import re
 import time
 from typing import Any
 
@@ -23,6 +34,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from systemone_builder.api.deps import get_rt
+from systemone_builder.kenning import jobs as kjobs
 from systemone_builder.kenning import registry
 from systemone_builder.runtime import Runtime
 from systemone_builder.system_one.contract import SystemOneRequest
@@ -101,6 +113,104 @@ async def export(name: str, rt: Runtime = Depends(get_rt)) -> dict[str, Any]:
 async def download(name: str, rt: Runtime = Depends(get_rt)) -> FileResponse:
     path = await asyncio.to_thread(_wrap, registry.export_bundle, _home(rt), name)
     return FileResponse(path, media_type="application/zip", filename=path.name)
+
+
+# ------------------------------------------------------- train & verify
+@router.get("/kenning/bases")
+async def bases() -> list[dict[str, Any]]:
+    return [{"id": k, "license": v, "apache_release": k not in registry.NC_BASES,
+             "recommended": k == "MoritzLaurer/deberta-v3-large-zeroshot-v2.0-c"}
+            for k, v in registry.BASE_LICENSES.items()]
+
+
+@router.get("/kenning/datasets")
+async def datasets(rt: Runtime = Depends(get_rt)) -> list[dict[str, Any]]:
+    return await asyncio.to_thread(kjobs.list_datasets, _home(rt))
+
+
+@router.get("/kenning/clef")
+async def clef(rt: Runtime = Depends(get_rt)) -> dict[str, Any]:
+    try:
+        async with httpx.AsyncClient(timeout=3) as c:
+            r = await c.get(f"{rt.settings.clef_url}/health")
+        return {"online": r.status_code == 200, **(r.json() if r.status_code == 200 else {})}
+    except httpx.HTTPError:
+        return {"online": False, "hint": "docker compose --profile clef up -d clef"}
+
+
+class JobRequest(BaseModel):
+    kind: str
+    params: dict[str, Any] = Field(default_factory=dict)
+
+
+@router.get("/kenning/jobs")
+async def list_jobs(limit: int = 30, rt: Runtime = Depends(get_rt)) -> dict[str, Any]:
+    return {"busy": rt.kenning_jobs.busy, "jobs": rt.kenning_jobs.list(min(max(limit, 1), 200))}
+
+
+@router.post("/kenning/jobs", status_code=202)
+async def start_job(body: JobRequest, rt: Runtime = Depends(get_rt)) -> dict[str, Any]:
+    try:
+        return rt.kenning_jobs.start(body.kind, body.params)
+    except kjobs.JobError as exc:
+        raise HTTPException(409 if "running" in str(exc) or "holds the GPU" in str(exc) else 400, str(exc)) from exc
+
+
+@router.get("/kenning/jobs/{job_id}")
+async def get_job(job_id: str, tail: int = 200, rt: Runtime = Depends(get_rt)) -> dict[str, Any]:
+    try:
+        return rt.kenning_jobs.get(job_id, min(max(tail, 1), 2000))
+    except kjobs.JobError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except KeyError:
+        raise HTTPException(404, "no such job") from None
+
+
+@router.post("/kenning/jobs/{job_id}/cancel")
+async def cancel_job(job_id: str, rt: Runtime = Depends(get_rt)) -> dict[str, Any]:
+    try:
+        return await rt.kenning_jobs.cancel(job_id)
+    except kjobs.JobError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+RESULT_FILE = re.compile(r"^(s1-)?bench-[\w.-]+\.json$")
+
+
+def _results_dir(rt: Runtime):  # noqa: ANN202
+    return rt.settings.data_dir / "eval_results"
+
+
+def _summaries(root) -> list[dict[str, Any]]:  # noqa: ANN001
+    out = []
+    for f in sorted(root.glob("*bench-*.json"), key=lambda f: f.stat().st_mtime, reverse=True)[:200]:
+        if not RESULT_FILE.match(f.name):
+            continue
+        try:
+            d = json.loads(f.read_text())
+        except (OSError, json.JSONDecodeError):
+            continue
+        suite = d.get("suite") or {}
+        out.append({"file": f.name, "ts": d.get("ts") or f.stat().st_mtime, "suite": suite.get("name"),
+                    "description": suite.get("description"), "gate": suite.get("gate"),
+                    "items": len(suite.get("items") or []), "reports": d.get("reports") or []})
+    return out
+
+
+@router.get("/kenning/bench/results")
+async def bench_results(rt: Runtime = Depends(get_rt)) -> list[dict[str, Any]]:
+    root = _results_dir(rt)
+    return await asyncio.to_thread(_summaries, root) if root.is_dir() else []
+
+
+@router.get("/kenning/bench/results/{file}")
+async def bench_result(file: str, rt: Runtime = Depends(get_rt)) -> dict[str, Any]:
+    if not RESULT_FILE.match(file):
+        raise HTTPException(400, "invalid result file name")
+    f = _results_dir(rt) / file
+    if not f.exists():
+        raise HTTPException(404, "no such result")
+    return json.loads(await asyncio.to_thread(f.read_text))
 
 
 # --------------------------------------------------------------- engines

@@ -101,6 +101,18 @@ class Settings(BaseSettings):
     # What answers POST /api/v1/systemone: "kenning" (the Kenning server) or
     # "logprob" (the label-token readout of a local LLM above).
     system_one_backend: str = "kenning"
+    # Kenning jobs (Train / Verify pages): containers and GPUs they pause and use.
+    kenning_gpu: int = 0
+    kenning_cuda_device: str | None = None  # native Linux: "0" (see the compose file's GPU note)
+    clef_gpu: int = 0
+    kenning_container: str = "systemone-kenning"
+    clef_container: str = "systemone-clef"
+    kenning_image: str = "systemone/kenning:latest"
+    kenning_train_container: str = "systemone-kenning-train"
+    kenning_train_mem_limit: str = "32g"
+    # Free VRAM (MiB) a training run needs once the GPU's services are paused
+    # (DeBERTa-v3-large at --max-length 512 peaks at ~18.1 GiB).
+    kenning_train_free_mb: int = 19500
 
     def kenning_dir(self) -> Path:
         return self.kenning_home or self.data_dir / "workspace" / "kenning"

@@ -127,6 +127,8 @@ async def training_status(rt: Runtime = Depends(get_rt)) -> dict[str, Any]:
 @router.post("/training/run", status_code=202)
 async def training_run(req: TrainRequest, rt: Runtime = Depends(pipeline_on)) -> dict[str, Any]:
     _domain(rt, req.domain)
+    if rt.kenning_jobs.busy:
+        raise HTTPException(409, "a Kenning job holds the GPU; wait for it or cancel it on the Train page")
     try:
         cfg = rt.lifecycle.start_cycle(req.domain, req.mode)
     except LifecycleError as exc:

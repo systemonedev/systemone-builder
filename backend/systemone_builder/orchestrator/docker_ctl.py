@@ -94,7 +94,9 @@ class DockerController(ContainerController):
         return ContainerInfo(
             name=c.name,
             status=c.status,
-            image=(c.image.tags[0] if c.image and c.image.tags else None),
+            # the name the container was created from, read from its own attrs: c.image
+            # fetches the image and fails (404) once a rebuild has replaced that image
+            image=(attrs.get("Config", {}) or {}).get("Image"),
             exit_code=state.get("ExitCode"),
             started_at=state.get("StartedAt"),
             gpus=gpus,

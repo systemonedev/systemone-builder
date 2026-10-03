@@ -113,8 +113,8 @@ Channels: `routing`, `telemetry`, `lifecycle`, `training`, `factory`, `dpo`, `ev
 
 ## system-one
 
-The [Jev](https://docs.typesafe.ai) System One contract, served by the local engine: a client can
-switch between TypeSafe Jev and this server by changing only the base URL and key.
+The System One wire format (compatible with TypeSafe's Jev), answered by Kenning: a client can switch
+between Jev, Clef and this server by changing only the base URL and key.
 
 | Method | Path | Description |
 |---|---|---|
@@ -133,9 +133,38 @@ curl -s http://localhost:8090/api/v1/systemone -H "X-API-Key: $S1_API_KEY" -H 'C
 
 Question types: `noul` (`criteria` optional), `choice` (`criteria` maps 2–255 option names to a
 description or `null`; the local engine reads up to 20), `score` (`criteria` is an ordered list of
-2–10 levels). Each answer is read from one forward pass of the local model (`S1_SYSTEM_ONE_LOCAL_URL` /
-`S1_SYSTEM_ONE_LOCAL_MODEL`, default: the triage server); `confidence` is `(max p − 1/n)/(1 − 1/n)`, the
-formula Jev's published examples follow. The response adds `latency_ms`, which Jev does not send.
+2–10 levels). Answers come from Kenning (`S1_SYSTEM_ONE_BACKEND=kenning`, the default) or, with
+`logprob`, from one forward pass of an LLM (`S1_SYSTEM_ONE_LOCAL_URL` / `S1_SYSTEM_ONE_LOCAL_MODEL`,
+default: the pipeline's triage server). `confidence` is `(max p − 1/n)/(1 − 1/n)`, the formula Jev's
+published examples follow. The response adds `latency_ms`, which Jev does not send.
+
+## kenning
+
+Model registry, training and benchmark jobs (the Models, Train and Verify pages).
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/kenning/status` | Kenning server health, served and active model, whether the pipeline is on |
+| GET | `/kenning/models` | Trained models with held-out metrics and training data |
+| POST | `/kenning/models/{name}/activate` | Serve it (hot swap, persisted) |
+| DELETE | `/kenning/models/{name}` | Delete (not the active one) |
+| POST / GET | `/kenning/models/{name}/export` | Build / download the bundle (weights, card, LICENSE, NOTICE.md, SHA256SUMS) |
+| GET | `/kenning/bases` | Base models with their licences |
+| GET | `/kenning/datasets` | Training sets with sources, licences and teacher |
+| GET | `/kenning/clef` | Whether the optional Clef teacher is running |
+| GET | `/kenning/jobs` | Jobs, newest first, and whether one is running |
+| POST | `/kenning/jobs` | Start `{kind, params}`: `data`, `label`, `train` or `bench` (one at a time; 409 while busy) |
+| GET | `/kenning/jobs/{id}` | One job with its log tail (`?tail=`) |
+| POST | `/kenning/jobs/{id}/cancel` | Stop it; services it paused are restarted |
+| GET | `/kenning/bench/results` | Benchmark runs (per-engine summaries, with the served model) |
+| GET | `/kenning/bench/results/{file}` | One run with per-item answers |
+| GET | `/systemone/engines` | Engines available here |
+| POST | `/systemone/compare` | One request on Kenning and (opt-in) Jev, side by side |
+
+```bash
+# train a model on an existing dataset (the Train page does the same)
+curl -s localhost:8090/api/v1/kenning/jobs -H "X-API-Key: $S1_API_KEY" -H 'Content-Type: application/json'   -d '{"kind": "train", "params": {"dataset": "clean-v3-train-clef", "name": "my-kenning", "epochs": 1}}'
+```
 
 ### Benchmark: `systemone bench`
 
