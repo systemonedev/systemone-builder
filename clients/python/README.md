@@ -1,4 +1,6 @@
-# systemone
+# systemone-client
+
+`pip install systemone-client`, then `import systemone`.
 
 The Python client for **System One** decision models. You ask typed questions about your program's
 state and get typed answers with calibrated probabilities: yes/no, pick one, or rate on a scale. The
@@ -39,14 +41,14 @@ The same code runs against all three: switch with the base URL.
 ## Install
 
 ```bash
-pip install systemone              # the HTTP client (only dependency: httpx)
-pip install "systemone[local]"     # + torch and transformers, to run Kenning in your own process
+pip install systemone-client              # the HTTP client (only dependency: httpx)
+pip install "systemone-client[local]"     # + torch and transformers, to run Kenning in your own process
 ```
 
 It needs Python 3.10 or later. For the latest unreleased code, install from source:
 
 ```bash
-pip install "systemone @ git+https://github.com/systemonedev/systemone-builder#subdirectory=clients/python"
+pip install "systemone-client @ git+https://github.com/systemonedev/systemone-builder#subdirectory=clients/python"
 ```
 
 You also need a model to ask. The quickest way is SystemOne Builder, which starts Kenning on one GPU:
@@ -159,7 +161,7 @@ else:
 
 ## Run Kenning in-process
 
-With `pip install "systemone[local]"` you can load Kenning without running a server: from the
+With `pip install "systemone-client[local]"` you can load Kenning without running a server: from the
 Hugging Face Hub, or from a bundle exported on SystemOne Builder's Models page.
 
 ```python

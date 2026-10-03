@@ -40,9 +40,9 @@ export default function ConnectPage() {
   useEffect(() => setHost(window.location.hostname || "localhost"), []);
   const model = status.data?.active ?? "kenning-large-v0.1";
 
-  const install = `pip install "systemone @ git+${REPO}#subdirectory=clients/python"
+  const install = `pip install "systemone-client @ git+${REPO}#subdirectory=clients/python"
 # to run an exported model in-process as well (adds torch + transformers):
-pip install "systemone[local] @ git+${REPO}#subdirectory=clients/python"`;
+pip install "systemone-client[local] @ git+${REPO}#subdirectory=clients/python"`;
 
   const direct = `from systemone import Client, Noul, Choice, Score
 

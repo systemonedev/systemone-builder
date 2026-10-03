@@ -2,7 +2,7 @@ name: release-client
 
 # Publishes the systemone package to PyPI when a maintainer pushes a tag like client-v0.1.0.
 # Uses PyPI Trusted Publishing (OIDC): no token is stored anywhere. One-time setup on pypi.org:
-# a (pending) trusted publisher for project "systemone", owner systemonedev, repository
+# a (pending) trusted publisher for project "systemone-client", owner systemonedev, repository
 # systemone-builder, workflow release-client.yml, environment pypi.
 
 on:
@@ -47,7 +47,7 @@ jobs:
     # The "pypi" environment requires a maintainer's approval before anything is uploaded.
     environment:
       name: pypi
-      url: https://pypi.org/p/systemone
+      url: https://pypi.org/p/systemone-client
     permissions:
       id-token: write   # Trusted Publishing
     steps:
