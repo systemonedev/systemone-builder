@@ -8,9 +8,19 @@ export type TelemetrySample = Record<string, any> & { ts: number };
 
 export type LiveStatus = { connected: boolean; reason: string | null };
 
-function closeReason(code: number): string {
-  if (code === 4401) return "API key missing or wrong - enter it in the sidebar";
-  if (code === 1006) return "cannot reach the API on port 8000";
+async function closeReason(code: number): Promise<string> {
+  if (code === 4401) return "the API rejected the dashboard's key - recreate api and dashboard after changing S1_API_KEY";
+  if (code === 1006) {
+    // Browsers report every failed handshake as 1006; find out which it is.
+    try {
+      const r = await fetch("/api/v1/health", { cache: "no-store" });
+      if (r.status === 401) return "sign in to the dashboard";
+      if (r.ok) return "the API answers HTTP but refused the WebSocket - check `docker compose logs api dashboard`";
+    } catch {
+      /* fall through */
+    }
+    return "cannot reach the API through the dashboard - check `docker compose logs dashboard`";
+  }
   return `connection closed (code ${code})`;
 }
 
@@ -30,7 +40,7 @@ export function useEvents(channels: string[], onEvent: (e: BusEvent) => void, on
       ws = new WebSocket(wsUrl(key ? key.split(",") : undefined));
       ws.onopen = () => setStatus({ connected: true, reason: null });
       ws.onclose = (ev) => {
-        setStatus({ connected: false, reason: closeReason(ev.code) });
+        closeReason(ev.code).then((reason) => setStatus({ connected: false, reason }));
         if (!closed) retry = setTimeout(connect, 1500);
       };
       ws.onmessage = (m) => {

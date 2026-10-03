@@ -20,7 +20,21 @@ jobs:
       - run: pytest backend/tests -q
         env:
           S1_TEST_REDIS_URL: redis://localhost:6379/15
-      - run: python -m py_compile backend/systemone/training/trainer_entry.py docker/student/serve_student.py examples/*.py
+      - run: python -m py_compile backend/systemone_builder/training/trainer_entry.py docker/student/serve_student.py examples/*.py
+
+  client:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -e "clients/python[dev]"
+      - run: pytest clients/python/tests -q
+      - run: pip install build && python -m build clients/python
 
   frontend:
     runs-on: ubuntu-latest
@@ -42,4 +56,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # the default (Kenning-only) stack and every optional profile must stay valid
       - run: docker compose config -q
+      - run: docker compose --profile pipeline --profile clef config -q
+    env:
+      S1_REDIS_PASSWORD: ci-only-not-a-secret

@@ -33,7 +33,8 @@ cp .env.example .env
 | Variable | Set it to |
 |---|---|
 | `S1_ORACLE_URL` | `http://<mac-ip>:11434` (a Tailscale IP works) |
-| `S1_API_KEY` | any secret; enter the same value in the dashboard sidebar |
+| `S1_REDIS_PASSWORD` | **required**: `openssl rand -hex 24` (compose won't start without it) |
+| `S1_API_KEY` | `openssl rand -hex 32`. The dashboard uses it server-side; you only type it in when the dashboard is exposed beyond loopback (it then asks you to sign in). Required before `S1_BIND_ADDR=0.0.0.0` |
 | `HF_TOKEN` | only needed for gated models (Llama, Gemma) |
 
 ### 0.3 WSL2 / Docker Desktop
@@ -55,7 +56,7 @@ docker compose build            # api, student/triage launcher, trainer, dashboa
 docker compose up -d
 ```
 
-Open **http://&lt;host&gt;:3000**. The sidebar lists every service with its state:
+Open **http://&lt;host&gt;:3090**. The sidebar lists every service with its state:
 
 | State | Meaning |
 |---|---|
@@ -136,7 +137,7 @@ Pick one of:
 - **From a starter template.** `computer_use`, `secops`, `desktop_vision` or
   `auth_log_bruteforce`:
   ```bash
-  curl -X POST localhost:8000/api/v1/templates/auth_log_bruteforce/install \
+  curl -X POST localhost:8090/api/v1/templates/auth_log_bruteforce/install \
        -H 'content-type: application/json' -H "X-API-Key: $S1_API_KEY" -d '{"bootstrap": true}'
   ```
 
@@ -153,7 +154,7 @@ sources, and you can combine them:
    one, and the LLM judge filters the results. Watch *accepted / rejected* grow.
 2. **Your real labelled data.** Import it in bulk:
    ```bash
-   curl -X POST localhost:8000/api/v1/datasets/<domain>/sft/bulk -H 'content-type: application/json' \
+   curl -X POST localhost:8090/api/v1/datasets/<domain>/sft/bulk -H 'content-type: application/json' \
         -H "X-API-Key: $S1_API_KEY" -d @samples.json   # [{"state": {...}, "action": {...}}, ...]
    ```
 3. **Live traffic** (the self-improving path). Point your client at `POST /api/v1/act/<domain>`
@@ -222,6 +223,8 @@ To compare against the teachers, run the same benchmark with target **triage** a
 | `UVA is not available` | Pinned memory is disabled (WSL2). The launcher enables it; run `wsl --update` if your kernel is older than 4.19.121. |
 | `unrecognized arguments` from vLLM | Rebuild the launcher image (`docker compose build student`) and recreate the containers (`docker compose up -d --force-recreate student triage`). |
 | `GPU 0 VRAM not released: … MiB used` | Something outside systemone holds memory on GPU 0. On WSL2 that's usually the Windows desktop, browsers or other apps using that GPU; NVML counts them. The flush check passes once at least `S1_VRAM_REQUIRED_FREE_MB` (default 21000, what vLLM at 0.85 utilization needs to restart) is free and stable. Close GPU-heavy Windows apps, move your display to the other GPU, or lower `S1_GPU_MEMORY_UTILIZATION` together with `S1_VRAM_REQUIRED_FREE_MB`. |
+| GPU 0 still ~23 GB used after the student stops, or triage appears on the wrong GPU | Docker Desktop / WSL2 exposes every GPU to every container, so without pinning CUDA puts triage on GPU 0 too. The launcher and trainer now pin themselves (`S1_GPU_INDEX`). Rebuild (`docker compose build student`) and recreate student and triage. `systemone doctor` and the dashboard warn if a service's GPU looks idle. |
+| "The API rejected the dashboard's key" | api and dashboard read `S1_API_KEY` from `.env` when they are created. After changing it, recreate both: `docker compose up -d api dashboard`. |
 | `EngineDeadError` / `engine manager stopped` in the student log when training starts | Expected: the lifecycle stops vLLM to free GPU 0, and vLLM logs its shutdown as errors. |
 | Training cycle rolled back | See the run's error on *Factory & Training*. `docker compose logs api` has the full trace. If a reload times out, increase `S1_STUDENT_START_TIMEOUT_S`. |
 | Oracle shows `degraded` | Run `ollama pull <model>` on the Mac. |

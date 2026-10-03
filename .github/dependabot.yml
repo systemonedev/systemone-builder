@@ -1,0 +1,7 @@
+# Weekly update PRs for pinned GitHub Actions (release-client.yml pins them by commit SHA).
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

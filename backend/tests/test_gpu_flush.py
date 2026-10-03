@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from systemone.orchestrator.gpu import GpuMonitor, GpuStatus
+from systemone_builder.orchestrator.gpu import GpuMonitor, GpuStatus
 
 
 class Scripted(GpuMonitor):
@@ -35,3 +35,14 @@ async def test_wsl2_desktop_baseline_passes_on_free_memory_once_stable():
 async def test_times_out_when_not_enough_free():
     with pytest.raises(TimeoutError, match="need 21000 MiB free"):
         await Scripted([6000]).wait_for_flush(0, 1024, 0.1, required_free_mb=21000, poll_s=0.01, stable_s=0.01)
+
+
+def test_placement_warning_when_triage_gpu_idle():
+    from systemone_builder.orchestrator.gpu import placement_warnings
+
+    gpus = [GpuStatus(0, "a", 24576, 23522, 0), GpuStatus(1, "b", 24576, 450, 0)]
+    w = placement_warnings(gpus, {"triage": 1}, {"triage"})
+    assert len(w) == 1 and "GPU 1 shows only 450 MiB" in w[0]
+    assert placement_warnings(gpus, {"triage": 1}, set()) == []
+    ok = [GpuStatus(0, "a", 24576, 2300, 0), GpuStatus(1, "b", 24576, 22400, 0)]
+    assert placement_warnings(ok, {"triage": 1}, {"triage"}) == []

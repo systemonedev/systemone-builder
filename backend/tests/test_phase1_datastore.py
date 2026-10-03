@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import asyncio
 
-from systemone.contracts.replay import Outcome, ReplayRecord
-from systemone.datastore.replay_buffer import RedisReplayBuffer
-from systemone.datastore.store import JsonStore
-from systemone.telemetry.bus import EventBus
+from systemone_builder.contracts.replay import Outcome, ReplayRecord
+from systemone_builder.datastore.replay_buffer import RedisReplayBuffer
+from systemone_builder.datastore.store import JsonStore
+from systemone_builder.telemetry.bus import EventBus
 
 
 def rec(i: int) -> ReplayRecord:
@@ -54,3 +54,17 @@ async def test_event_bus_fanout():
     bus.publish("routing", "escalate", tier="triage")
     ev = await q.get()
     assert ev["channel"] == "routing" and ev["data"]["tier"] == "triage"
+
+
+def test_api_refuses_lan_bind_without_real_key():
+    import pytest
+
+    from systemone_builder.api.app import check_exposure
+    from systemone_builder.config import Settings
+
+    check_exposure(Settings(bind_addr="127.0.0.1", api_key=None))  # loopback: warning only
+    with pytest.raises(RuntimeError, match="S1_API_KEY"):
+        check_exposure(Settings(bind_addr="0.0.0.0", api_key="change-me"))
+    with pytest.raises(RuntimeError):
+        check_exposure(Settings(bind_addr="0.0.0.0", api_key=None))
+    check_exposure(Settings(bind_addr="0.0.0.0", api_key="3f1c9a0b7d2e4f6a8b1c3d5e7f9a0b2c"))

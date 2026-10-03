@@ -1,127 +1,157 @@
-# systemone-builder
+# SystemOne Builder
 
-**Open-source autonomous System-1 reflex model distillation.**
+**Build, benchmark and serve System One decision models on your own hardware.**
 
-`systemone-builder` distills slow, deliberative *System-2* reasoning into sub-100ms,
-deterministic *System-1* reflex models. Bring your own hardware and models, describe the
-specialization you want in plain language, hit play: the framework generates the
-workflow, data schemas and synthetic-data parameters, runs a local
-distill → train → hot-reload loop, benchmarks the result on real held-out data and
-serves it behind a confidence-routed fast/slow cascade. No closed-source APIs.
+A System One model answers typed questions about program state (yes/no, pick one, rate on a scale)
+with calibrated probabilities, in one forward pass, in milliseconds. It doesn't write text. It is the
+fast, deterministic reflex in front of slower reasoning:
+- auto-act when the model is sure;
+- auto-close when it is sure the answer is no;
+- send everything else to a person or to an LLM.
 
-Primary example domains:
+SystemOne Builder is the open toolkit for these models. With it you can:
+- **serve** one locally behind the `POST /v1/systemone` wire format;
+- **train** your own from permissively licensed data and distilled soft labels;
+- **benchmark** it against other System One models, for calibration and safe automation as well
+  as accuracy;
+- **ship** it as a bundle with a model card and licence notice.
 
-* **Real-time computer-use**: GUI/DOM and vision automation with pixel-coordinate fallbacks.
-* **Cybersecurity reflex triage**: SecOps verdicts and containment actions from IDS/log events.
+The flagship model is **Kenning**.
 
 ```text
-+---------------------------------------------------------------------------------------------------+
-|                                LINUX HOST (NVML Orchestrator + 120GB RAM)                         |
-|  *120GB RAM Role: In-Memory Datastore (Redis) for Replay Buffering & vLLM CPU KV-Cache Offload*   |
-+-----------------------------------------+---------------------------------------------------------+
-|                GPU 0                    |                         GPU 1                           |
-|          NVIDIA RTX 3090 (24GB)         |                 NVIDIA RTX 3090 (24GB)                  |
-+-----------------------------------------+---------------------------------------------------------+
-| [Role: Sub-100ms Student Engine]        | [Role: Intermediate Synchronous Triage]                 |
-| *Strict Lifecycle Managed to avoid OOM* | CONTAINER C: vLLM Server (BYOM Dense / MoE)             |
-| CONTAINER A: Unsloth QLoRA Trainer      | - Fast-Slow escalation layer for moderate complexity    |
-| CONTAINER B: vLLM Student Runner        | - Handles live fallback generation                      |
-| - Prefix Caching Enabled                |                                                         |
-+-----------------------------------------+---------------------------------------------------------+
-                                          |
-                                     (LAN / REST)
-                                          |
-+---------------------------------------------------------------------------------------------------+
-|                                MAC M4 MAX ENDPOINT (64GB Unified Memory)                          |
-+---------------------------------------------------------------------------------------------------+
-| [Role: Asynchronous Oracle & DPO Evaluator]                                                       |
-| OLLAMA SERVER: Hosting `qwen3.8:27b` (or user-defined 70B+ model)                                 |
-| - Offline Synthetic Data Factory (batch CoT generation to free up Linux GPUs).                    |
-| - Deep Out-of-Band Threat Analysis & LLM-as-a-Judge validation.                                   |
-+---------------------------------------------------------------------------------------------------+
+state + questions ──▶ Kenning (cross-encoder, ~2 GB VRAM) ──▶ {"phish": {"noul": 0.82}}  ──▶ act / close / escalate
 ```
 
-## Zero-to-One Quickstart
+## Quickstart (one NVIDIA GPU)
 
-On the Mac (oracle), once:
+Requirements: an NVIDIA driver, the NVIDIA Container Toolkit (or Docker Desktop with WSL2), and Docker Compose v2.20 or later.
 
 ```bash
-./mac/setup_oracle.sh            # exposes Ollama on the LAN and pulls qwen3.8:27b
+cp .env.example .env                 # set S1_REDIS_PASSWORD (openssl rand -hex 24)
+docker compose up -d                 # Redis, API, dashboard, Kenning
 ```
 
-On the Linux host (NVIDIA driver + NVIDIA Container Toolkit + Docker Compose v2):
+- Dashboard: **http://localhost:3090**. *Try it* takes your own questions, *Models* trains and
+  exports, *Connect* has client code.
+- Kenning: `127.0.0.1:8093`. The API, with interactive docs at `/docs`, is on `127.0.0.1:8090`.
 
 ```bash
-cp .env.example .env             # set S1_ORACLE_URL to the Mac, optionally S1_API_KEY / HF_TOKEN
-docker compose up
+curl -s localhost:8093/v1/systemone -H 'content-type: application/json' -d '{
+  "state": {"from": "it-support@examp1e-corp.com", "subject": "Password expires today",
+            "body": "Keep your password: sign in at http://examp1e-corp.com.verify-login.io"},
+  "questions": {
+    "phish":   {"type": "noul",   "instructions": "Is this email a phishing attempt?"},
+    "urgency": {"type": "score",  "instructions": "How urgent does the sender make it sound?",
+                "criteria": ["none", "low", "medium", "high"]},
+    "route":   {"type": "choice", "instructions": "Which team should handle it?",
+                "criteria": {"security": null, "it_helpdesk": null, "finance": null, "none": null}}}}'
 ```
 
-`docker compose up` builds and starts Redis, the orchestrator API, the vLLM student
-(GPU 0, `Qwen/Qwen2.5-1.5B-Instruct`), the vLLM triage server (GPU 1) and the dashboard.
-It then runs the one-shot **quickstart** service, which:
+From Python ([`clients/python`](clients/python), `pip install ./clients/python`):
 
-1. loads a dummy web-automation dataset (procedurally generated, or pulled from
-   `S1_QUICKSTART_DATASET_URL`) as SFT data plus an unseen held-out set,
-2. runs the first strict **pause vLLM → flush VRAM → Unsloth QLoRA → hot-reload** cycle on GPU 0,
-3. benchmarks the fine-tuned student and prints accuracy, hallucination ratio and latency.
+```python
+from systemone import Client, Noul
+answer = Client("http://localhost:8093").system_one(
+    state={"ticket": "I was charged twice this month."},
+    questions={"billing": Noul("Is this about billing?")})
+print(answer.nouls["billing"].noul)        # 0.93
+```
 
-Open **http://&lt;linux-host&gt;:3000** for the dashboard. Interactive API docs are at `:8000/docs`.
-`systemone doctor` (inside the `api` container or a local install) checks GPUs, Docker,
-Redis and all three model endpoints.
+Out of the box, Kenning serves a zero-shot base model with no non-commercial data in its lineage,
+[`deberta-v3-large-zeroshot-v2.0-c`](https://huggingface.co/MoritzLaurer/deberta-v3-large-zeroshot-v2.0-c)
+(MIT). The trained flagship is published under Apache-2.0:
+[**systemonedev/kenning-large-v0.4**](https://huggingface.co/systemonedev/kenning-large-v0.4). Serve it with
+`S1_KENNING_MODEL=systemonedev/kenning-large-v0.4` in `.env`, or load it in-process with
+`Kenning.from_pretrained("systemonedev/kenning-large-v0.4")`.
 
-## What's inside
+## Kenning results
 
-| Module | What it does | Code |
-|---|---|---|
-| **A** State extraction & RAM buffering | Fuzzy scrubbing of DOM/logs to preserve vLLM prefix-cache hits; Redis replay buffer of the last 10,000 actions + state deltas | `extraction/`, `datastore/` |
-| **B** Synthetic distillation & validation | Mac-side batch CoT generation from replay + seed synthesis, LLM-as-a-Judge, screenshot → element vision parsing | `factory/` |
-| **C** Fine-tuning engine & VRAM orchestrator | Strict GPU 0 lifecycle (drain → stop vLLM → NVML flush check → Unsloth QLoRA on all linear layers → flush check → hot-reload), rollback | `training/`, `orchestrator/`, `docker/trainer`, `docker/student` |
-| **D** Real-time playground & fast-slow routing | Calibrated confidence (self-report × decision-token probability), per-domain thresholds, Student → Triage → Oracle cascade | `routing/` |
-| **E** Contextual DPO feedback loop | State-delta capture of failed actions, delta injection to the teacher, corrections studio, DPO pairs | `dpo/` |
-| **F** Unified web dashboard | Prompt-to-Workflow engine, live telemetry (TTFT, prefix-cache hit rate, loss), routing map, replay scrubber, DPO studio | `workflow/`, `telemetry/`, `frontend/` |
-| **G** Evaluation & accuracy suite | Held-out benchmarking: accuracy, success rate, hallucination ratio, latency/TTFT distributions, calibration, readiness gates | `evaluation/` |
-| **H** Open-source DX | One-command quickstart, BYOM adapters/plugins, starter templates, CLI | `quickstart/`, `adapters/`, `templates/`, `cli.py` |
+Benchmarks run with `systemone bench`. The full method, data and caveats are in
+[docs/kenning.md](docs/kenning.md).
 
-Backend code lives under `backend/systemone/`.
+| | Kenning v0.4 (local) | [Clef-flash](https://blog.cloudflare.com/clef-decision-models/) (local) | TypeSafe Jev (hosted) |
+|---|---|---|---|
+| Held-out modern emails: accuracy | 0.75 | 0.90 | 0.90 |
+| Held-out modern emails: phishing auto-closed as safe | **0** | 0 | 0 |
+| Phishing dataset (50) | 0.78 | 0.96 | 0.96 |
+| Out of domain: spam / emotion / news | 0.917 / 0.583 / 0.867 | 0.900 / 0.600 / 0.950 | 0.967 / 0.583 / 0.933 |
+| Latency p50 (one RTX 3090) | 33–70 ms | 220–290 ms | ~150 ms (network) |
+| GPU memory | ~2 GB | ~18 GB | – |
 
-## Using it
+Kenning is about 20 times smaller than Clef and several times faster, and it is calibrated
+conservatively: when it automates a decision it was right in every suite except one spam message.
+It is still behind on subtle real-world phishing, so keep a person in the loop for those.
+
+## Train your own
 
 ```bash
-# route an observation (the reflex path)
-curl -s localhost:8000/api/v1/act/secops -H 'content-type: application/json' -d '{
-  "observation": {"kind": "json", "data": {"source": "suricata_eve", "src_ip": "192.168.1.150",
-                  "payload_snippet": "GET /../../../../etc/passwd HTTP/1.1\r\n\r\n"}}}'
-
-# report what happened (feeds the state-delta DPO loop)
-curl -s localhost:8000/api/v1/feedback -H 'content-type: application/json' \
-  -d '{"seq": 42, "outcome": "failure", "post_observation": {...}}'
-
-# create a new specialization from a prompt
-curl -s localhost:8000/api/v1/workflows/generate -H 'content-type: application/json' \
-  -d '{"prompt": "Block SSH brute-forcers on our bastions, never block 10.20.0.0/16"}'
+docker compose exec api systemone data --task multitask --per-source 1200      # build training rows
+docker compose --profile clef up -d clef                                        # optional teacher
+docker compose exec api systemone label /workspace/kenning/datasets/<rows>.jsonl --alpha 0.5 --batch 8
+docker compose run --rm --no-deps kenning python -m systemone_builder.kenning.train \
+  --data /workspace/kenning/datasets/<rows>.jsonl --out /workspace/kenning/models/my-model
+docker compose exec api systemone bench --suite modern2 --engines kenning,clef
+docker compose exec api systemone publish my-model --org <your-hf-org>              # share it (Apache-2.0 models)
 ```
 
-Complete client loops are in [`examples/`](examples): a Playwright computer-use agent and a
-Suricata EVE reflex tailer that drives nftables.
+Training fits in 24 GB. A run on ~30k rows takes 40 minutes to 2 hours on an RTX 3090.
+[docs/kenning.md](docs/kenning.md) covers:
+- data sources and their licences;
+- synthetic data and distillation from Clef (Apache-2.0);
+- calibration;
+- every benchmark suite;
+- how to compare with TypeSafe Jev using your own key (opt-in; Jev outputs are never used for
+  training).
+
+## Optional: the generative pipeline
+
+The project started as a generative distillation pipeline, and it is still included, for agents
+that need free-form actions. It needs 2 GPUs: a vLLM student on GPU 0 and a vLLM triage model on
+GPU 1, plus an optional Ollama oracle on another machine. The pipeline:
+- is a fast/slow cascade with LoRA hot-reloads;
+- feeds failed actions back as DPO training data;
+- includes a prompt-to-workflow generator.
+
+```bash
+# in .env: S1_PIPELINE=1 and COMPOSE_PROFILES=pipeline
+docker compose up -d                 # adds the student, triage, trainer and the one-shot quickstart
+```
+
+The dashboard then shows the *Legacy pipeline* pages. See [docs/architecture.md](docs/architecture.md),
+[docs/first-model.md](docs/first-model.md) and [docs/hardware.md](docs/hardware.md).
 
 ## Documentation
 
-* **[Build your first System-1 model](docs/first-model.md)**: step-by-step walkthrough
-* [Architecture](docs/architecture.md): data flow, routing, lifecycle state machine
-* [Hardware & deployment](docs/hardware.md): GPU/RAM budget, Mac oracle, networking
-* [BYOM](docs/byom.md): plugging in your own student/triage/oracle models and adapters
-* [Domains & templates](docs/domains.md): data contracts, starter templates, Prompt-to-Workflow
-* [Training & evaluation](docs/training.md): factory, lifecycle, DPO, benchmarking
+* **[Kenning](docs/kenning.md)**: how it works, training, distillation, benchmarks, licensing
 * [API reference](docs/api.md)
+* [Hardware & deployment](docs/hardware.md): GPU/RAM budget, WSL2 notes, networking
+* Generative pipeline: [architecture](docs/architecture.md), [first model](docs/first-model.md),
+  [BYOM](docs/byom.md), [domains](docs/domains.md), [training & evaluation](docs/training.md)
 
 ## Development
 
 ```bash
 python -m venv .venv && . .venv/bin/activate
-pip install -e "backend[dev]"
+pip install -e "backend[dev]" -e "clients/python[dev]"
 redis-server --daemonize yes
-S1_TEST_REDIS_URL=redis://localhost:6379/15 pytest backend/tests
-cd frontend && npm ci && npm run dev      # dashboard on :3000 against an API on :8000
+S1_TEST_REDIS_URL=redis://localhost:6379/15 pytest backend/tests clients/python/tests
+cd frontend && npx next dev -p 3001 &    # Next.js dev server on a private port
+# dashboard on :3000 (via the gateway) against `systemone serve` on :8000
+S1_NEXT_URL=http://localhost:3001 S1_API_INTERNAL_URL=http://localhost:8000 PORT=3000 node gateway.mjs
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). Licensed under Apache-2.0.
+See [CONTRIBUTING.md](CONTRIBUTING.md) (data rules, DCO sign-off), [SECURITY.md](SECURITY.md)
+and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
+
+## Licence and credits
+
+Code and Kenning weights: Apache-2.0 ([LICENSE](LICENSE), [NOTICE](NOTICE)). Each exported model
+ships with its licence and a `NOTICE.md` listing the base model and every training source with
+their licences. Models built on a base with non-commercial training data are marked as not
+Apache-2.0. Created by [Jesus Rodriguez](https://github.com/jesusdrodriguez); maintained by
+[systemonedev](https://github.com/systemonedev) ([systemone.dev](https://systemone.dev)).
+
+The System One category and wire format were introduced by TypeSafe AI with Jev. SystemOne Builder
+implements a compatible format, is not affiliated with or endorsed by TypeSafe AI, and does not
+train on TypeSafe outputs. Clef is Cloudflare's (Apache-2.0); this project is not affiliated with
+Cloudflare.

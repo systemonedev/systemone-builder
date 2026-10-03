@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "systemone"
+version = "0.1.0"
+description = "Client for System One decision models such as Kenning: typed questions in, calibrated typed answers out"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+dependencies = ["httpx>=0.27"]
+keywords = ["system one", "decision model", "kenning", "calibration", "classification", "guardrails"]
+authors = [{ name = "Jesus Rodriguez" }, { name = "SystemOne Builder contributors" }]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Typing :: Typed",
+]
+
+[project.urls]
+Homepage = "https://systemone.dev"
+Documentation = "https://github.com/systemonedev/systemone-builder/tree/main/clients/python#readme"
+Source = "https://github.com/systemonedev/systemone-builder/tree/main/clients/python"
+Issues = "https://github.com/systemonedev/systemone-builder/issues"
+Changelog = "https://github.com/systemonedev/systemone-builder/blob/main/clients/python/CHANGELOG.md"
+Models = "https://huggingface.co/systemonedev"
+
+[project.optional-dependencies]
+# run a Kenning model in-process (a Hugging Face repo id or an exported bundle), without a server
+local = ["torch>=2.2", "transformers>=4.48", "safetensors", "huggingface_hub>=0.24"]
+dev = ["pytest>=8", "pytest-asyncio>=0.23", "build>=1.2", "twine>=5"]
+
+[tool.setuptools.packages.find]
+include = ["systemone*"]
+
+[tool.setuptools.package-data]
+systemone = ["py.typed"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"

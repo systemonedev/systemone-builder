@@ -11,7 +11,7 @@ import os
 
 import pytest
 
-from systemone.datastore.store import create_redis
+from systemone_builder.datastore.store import create_redis
 
 TEST_REDIS_URL = os.environ.get("S1_TEST_REDIS_URL", "redis://localhost:6379/15")
 

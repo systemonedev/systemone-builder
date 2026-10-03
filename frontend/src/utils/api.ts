@@ -1,31 +1,10 @@
-// REST client for the systemone LAN API.
+// REST client for the systemone API.
 //
-// The API base defaults to port 8000 on the same host that serves the
-// dashboard, so opening http://<linux-host>:3000 from any LAN machine works.
-// NEXT_PUBLIC_S1_API_URL overrides it; the X-API-Key is kept per browser.
-
-export function apiBase(): string {
-  const env = process.env.NEXT_PUBLIC_S1_API_URL;
-  if (env) return env.replace(/\/$/, "");
-  if (typeof window === "undefined") return "http://localhost:8000";
-  return `${window.location.protocol}//${window.location.hostname}:8000`;
-}
-
-export function apiKey(): string | null {
-  try {
-    return window.localStorage.getItem("s1.apiKey");
-  } catch {
-    return null;
-  }
-}
-
-export function setApiKey(key: string) {
-  try {
-    window.localStorage.setItem("s1.apiKey", key);
-  } catch {
-    /* storage unavailable: key lasts for this page only */
-  }
-}
+// The browser only talks to the dashboard's own origin. Its gateway
+// (frontend/gateway.mjs) forwards /api/v1/* to the API and adds S1_API_KEY
+// server-side, so the key never reaches the browser. When the dashboard is
+// exposed beyond loopback, the gateway requires a sign-in (HttpOnly session
+// cookie) first; see authStatus/login/logout.
 
 export class ApiError extends Error {
   constructor(public status: number, public detail: unknown) {
@@ -35,14 +14,12 @@ export class ApiError extends Error {
 
 export async function api<T = unknown>(path: string, init: RequestInit & { json?: unknown } = {}): Promise<T> {
   const headers: Record<string, string> = { ...(init.headers as Record<string, string>) };
-  const key = apiKey();
-  if (key) headers["X-API-Key"] = key;
   let body = init.body;
   if (init.json !== undefined) {
     headers["Content-Type"] = "application/json";
     body = JSON.stringify(init.json);
   }
-  const res = await fetch(`${apiBase()}/api/v1${path}`, { ...init, headers, body, cache: "no-store" });
+  const res = await fetch(`/api/v1${path}`, { ...init, headers, body, cache: "no-store", credentials: "same-origin" });
   if (res.status === 204) return undefined as T;
   const data = await res.json().catch(() => null);
   if (!res.ok) throw new ApiError(res.status, data?.detail ?? data ?? res.statusText);
@@ -50,10 +27,24 @@ export async function api<T = unknown>(path: string, init: RequestInit & { json?
 }
 
 export function wsUrl(channels?: string[]): string {
-  const base = apiBase().replace(/^http/, "ws");
+  const proto = window.location.protocol === "https:" ? "wss" : "ws";
   const qs = new URLSearchParams();
   if (channels?.length) qs.set("channels", channels.join(","));
-  const key = apiKey();
-  if (key) qs.set("api_key", key);
-  return `${base}/api/v1/ws?${qs.toString()}`;
+  return `${proto}://${window.location.host}/api/v1/ws?${qs.toString()}`;
 }
+
+export type AuthStatus = { required: boolean; authenticated: boolean };
+
+async function authCall(path: string, init?: RequestInit): Promise<AuthStatus & { detail?: string }> {
+  const res = await fetch(`/s1-auth/${path}`, { cache: "no-store", credentials: "same-origin", ...init });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new ApiError(res.status, data?.detail ?? res.statusText);
+  return data;
+}
+
+export const authStatus = () => authCall("status");
+
+export const login = (key: string) =>
+  authCall("login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key }) });
+
+export const logout = () => authCall("logout", { method: "POST" });

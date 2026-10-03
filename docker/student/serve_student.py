@@ -54,6 +54,40 @@ def supported_flags() -> set[str] | None:
     return None
 
 
+def pin_gpu(tag: str) -> None:
+    """Pin this process to GPU ``S1_GPU_INDEX`` when isolation is not enforced.
+
+    Compose (``device_ids``) and the orchestrator (``DeviceRequest``) expose a
+    single GPU per container on native Linux, where index 0 inside the
+    container is the right one. Docker Desktop / WSL2 exposes every GPU to every
+    container regardless, so CUDA would default to GPU 0 for all of them and
+    the triage server would land on the student's GPU. In that case pin
+    explicitly. PCI bus order makes CUDA's numbering match NVML's.
+    """
+    os.environ.setdefault("CUDA_DEVICE_ORDER", "PCI_BUS_ID")
+    want = os.environ.get("S1_GPU_INDEX")
+    if want is None or os.environ.get("CUDA_VISIBLE_DEVICES"):
+        return
+    try:
+        out = subprocess.run(["nvidia-smi", "-L"], capture_output=True, text=True, timeout=30).stdout
+        visible = [ln for ln in out.splitlines() if ln.startswith("GPU ")]
+    except (OSError, subprocess.TimeoutExpired):
+        visible = []
+    if not visible:  # no nvidia-smi in the image: ask NVML directly
+        try:
+            import pynvml
+
+            pynvml.nvmlInit()
+            visible = [str(i) for i in range(pynvml.nvmlDeviceGetCount())]
+            pynvml.nvmlShutdown()
+        except Exception:
+            visible = []
+    if len(visible) > 1:
+        os.environ["CUDA_VISIBLE_DEVICES"] = want
+        print(f"[{tag}] {len(visible)} GPUs visible (container GPU isolation not enforced, e.g. WSL2): "
+              f"pinning to GPU {want} via CUDA_VISIBLE_DEVICES", flush=True)
+
+
 def in_wsl() -> bool:
     # Same test vLLM uses (vllm/platforms/interface.py); inside a container the
     # kernel string is the host's, so this also detects Docker Desktop / WSL2.
@@ -164,19 +198,61 @@ def probe_offload_gb(requested: int) -> int:
     return 0
 
 
+def wsl_safe_mode() -> bool:
+    """S1_VLLM_SAFE_MODE: 1 = --enforce-eager, anything else = off (the default)."""
+    return os.environ.get("S1_VLLM_SAFE_MODE", "").strip().lower() in ("1", "true", "on", "yes")
+
+
+def log_memory_budget() -> None:
+    """Print the memory this container may use, so logs show each engine's budget."""
+    limit = None
+    for path in ("/sys/fs/cgroup/memory.max", "/sys/fs/cgroup/memory/memory.limit_in_bytes"):
+        try:
+            raw = open(path).read().strip()
+            if raw != "max" and int(raw) < 1 << 60:
+                limit = int(raw)
+            break
+        except (OSError, ValueError):
+            continue
+    try:
+        total = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
+    except (ValueError, OSError):
+        total = None
+    gb = lambda b: f"{b / 1024**3:.0f} GB" if b else "unknown"  # noqa: E731
+    print(f"[serve_{ROLE}] memory: container limit {gb(limit) if limit else 'none'}, host/VM total {gb(total)}", flush=True)
+
+
 def main() -> None:
+    pin_gpu(f"serve_{ROLE}")
+    log_memory_budget()
     warn_slow_storage()
     if os.environ.get("S1_CLEAN_SHM", "1") != "0":
         clean_stale_offload_files()
-    if in_wsl() and "VLLM_WSL2_ENABLE_PIN_MEMORY" not in os.environ:
-        # vLLM disables pinned memory under WSL2 by default, and its V2 model
-        # runner cannot start without it ("RuntimeError: UVA is not available").
-        # WSL2 kernels >= 4.19.121 support pinned memory; set
-        # VLLM_WSL2_ENABLE_PIN_MEMORY=0 explicitly to opt out.
-        os.environ["VLLM_WSL2_ENABLE_PIN_MEMORY"] = "1"
-        print(f"[serve_{ROLE}] WSL2 kernel detected ({platform.release()}): enabling VLLM_WSL2_ENABLE_PIN_MEMORY=1", flush=True)
+    # vLLM parses these with int(): an empty value (e.g. "VAR=" in .env or an
+    # empty compose default) crashes it, so treat empty as unset.
+    for var in ("VLLM_WSL2_ENABLE_PIN_MEMORY", "VLLM_USE_V2_MODEL_RUNNER"):
+        if os.environ.get(var) == "":
+            del os.environ[var]
+    if in_wsl():
+        # Never pin host memory on WSL2. vLLM turns it off there on purpose
+        # (NVIDIA's CUDA-on-WSL known limitations); forcing it on routes large
+        # page-locked buffers through the dxg GPU-paravirtualization channel,
+        # and that is what killed the whole WSL2 VM (and once Windows) here.
+        # The V1 model runner needs no pinned/UVA buffers, so use it instead
+        # of the V2 runner ("RuntimeError: UVA is not available").
+        # Override either variable in .env only to experiment.
+        os.environ.setdefault("VLLM_WSL2_ENABLE_PIN_MEMORY", "0")
+        os.environ.setdefault("VLLM_USE_V2_MODEL_RUNNER", "0")
+        print(f"[serve_{ROLE}] WSL2 kernel detected ({platform.release()}): pinned memory "
+              f"{'ON (overridden in env)' if os.environ['VLLM_WSL2_ENABLE_PIN_MEMORY'] == '1' else 'off'}, "
+              f"V2 model runner {'on' if os.environ['VLLM_USE_V2_MODEL_RUNNER'] == '1' else 'off'}", flush=True)
+    safe = wsl_safe_mode()
+    if safe:
+        # No torch.compile / CUDA-graph capture at startup: slower per token,
+        # but the fewest moving parts while a model loads under WSL2.
+        print(f"[serve_{ROLE}] safe mode: --enforce-eager (unset S1_VLLM_SAFE_MODE to disable)", flush=True)
     if ROLE == "triage":
-        model = env("S1_TRIAGE_MODEL", "Qwen/Qwen2.5-14B-Instruct-AWQ")
+        model = env("S1_TRIAGE_MODEL", "Qwen/Qwen2.5-7B-Instruct")
         served, lora = model, None
         defaults = {"util": "0.90", "len": "16384", "offload": "16"}
     else:
@@ -195,13 +271,29 @@ def main() -> None:
         "--max-model-len", env("S1_MAX_MODEL_LEN", defaults["len"]),
     ]
     # (flag, value or None) - each dropped if this vLLM does not know it
-    optional: list[tuple[str, str | None]] = [
-        ("--enable-prefix-caching", None),
-        ("--enable-prompt-tokens-details", None),
-        ("--max-num-seqs", env("S1_MAX_NUM_SEQS", "64")),
-        ("--generation-config", "vllm"),
-    ]
-    offload = env("S1_KV_OFFLOAD_GB", defaults["offload"])
+    if ROLE == "triage":
+        # Same launch as the mindoril vLLM servers, which run AWQ models on this
+        # machine's GPU 1 without trouble: few sequences, chunked prefill, fp16.
+        optional: list[tuple[str, str | None]] = [
+            ("--dtype", env("S1_DTYPE", "half")),
+            ("--max-num-seqs", env("S1_MAX_NUM_SEQS", "3")),
+            ("--enable-chunked-prefill", None),
+        ]
+    else:
+        optional = [
+            ("--enable-prefix-caching", None),
+            ("--enable-prompt-tokens-details", None),
+            ("--max-num-seqs", env("S1_MAX_NUM_SEQS", "64")),
+            ("--generation-config", "vllm"),
+        ]
+    if safe:
+        optional.append(("--enforce-eager", None))
+    # Unset => role default on Linux, but 0 on WSL2: pre-faulting tens of GB of
+    # shared, GPU-registered host memory has taken the whole WSL2 VM down.
+    # Set S1_KV_OFFLOAD_GB explicitly to opt in (raise it gradually).
+    if not os.environ.get("S1_KV_OFFLOAD_GB") and in_wsl():
+        print(f"[serve_{ROLE}] WSL2: CPU KV offload disabled by default (set S1_KV_OFFLOAD_GB to enable)", flush=True)
+    offload = env("S1_KV_OFFLOAD_GB", "0" if in_wsl() else defaults["offload"])
     if offload != "0" and os.environ.get("S1_KV_OFFLOAD_PROBE", "1") != "0":
         fitted = probe_offload_gb(int(float(offload)))
         if str(fitted) != offload:

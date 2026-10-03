@@ -1,0 +1,428 @@
+"""Kenning jobs: build data, label with a teacher, train and benchmark from the API.
+
+The Train and Verify pages drive these. One job runs at a time, because they
+share a GPU with the serving containers. A job that needs the GPU pauses the
+services on it (Kenning, the student, Clef - except the one it uses), waits for
+the memory to be released, and restarts what it paused when it ends, whether
+it succeeded, failed or was cancelled.
+
+    data   ``systemone data``  (subprocess in the API container)
+    label  ``systemone label`` (subprocess; Clef must be running)
+    train  ``kenning.train``   (one-shot container from the Kenning image)
+    bench  ``systemone bench`` per suite (subprocess)
+
+Every parameter is validated against an allow-list and turned into an argument
+list (never a shell string). Jobs are files under ``<kenning_dir>/jobs``
+(``<id>.json`` + ``<id>.log``), so they survive API restarts; a job that was
+running when the API stopped is marked interrupted.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import re
+import sys
+import time
+import uuid
+from contextlib import asynccontextmanager
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, AsyncIterator
+
+import httpx
+
+from systemone_builder.kenning import registry
+from systemone_builder.orchestrator.docker_ctl import RunSpec
+
+if TYPE_CHECKING:
+    from systemone_builder.runtime import Runtime
+
+log = logging.getLogger(__name__)
+
+KINDS = ("data", "label", "train", "bench")
+SUITES = ("modern2", "modern", "phishing", "layouts", "ood")
+ENGINES = ("kenning", "clef", "jev", "local")
+DATA_SOURCES = ("amazon", "dbpedia", "clinc", "boolq", "nli", "civil")
+SLUG = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
+HF_ID = re.compile(r"^[A-Za-z0-9][\w.-]{0,95}/[\w.-]{1,96}$")
+STEP = re.compile(r"step (\d+)/(\d+)")
+ROWS = re.compile(r"(\d+)/(\d+) rows")
+
+
+class JobError(ValueError):
+    pass
+
+
+# ------------------------------------------------------------- validation
+def _int(p: dict[str, Any], key: str, default: int, lo: int, hi: int) -> int:
+    v = p.get(key, default)
+    if isinstance(v, bool) or not isinstance(v, (int, float)) or int(v) != v or not lo <= v <= hi:
+        raise JobError(f"{key} must be an integer from {lo} to {hi}")
+    return int(v)
+
+
+def _float(p: dict[str, Any], key: str, default: float, lo: float, hi: float) -> float:
+    v = p.get(key, default)
+    if isinstance(v, bool) or not isinstance(v, (int, float)) or not lo <= v <= hi:
+        raise JobError(f"{key} must be a number from {lo} to {hi}")
+    return float(v)
+
+
+def _slug(p: dict[str, Any], key: str, default: str | None = None) -> str:
+    v = p.get(key, default)
+    if not isinstance(v, str) or not SLUG.match(v):
+        raise JobError(f"{key} must be lower-case letters, digits, '.', '_' or '-' (max 64)")
+    return v
+
+
+def dataset_path(home: Path, name: str) -> Path:
+    if not SLUG.match(name or ""):
+        raise JobError(f"invalid dataset name {name!r}")
+    return home / "datasets" / f"{name}.jsonl"
+
+
+def list_datasets(home: Path) -> list[dict[str, Any]]:
+    root = home / "datasets"
+    out = []
+    for f in sorted(root.glob("*.jsonl")) if root.is_dir() else []:
+        if not SLUG.match(f.stem):
+            continue
+        m = f.with_suffix(".manifest.json")
+        manifest = json.loads(m.read_text()) if m.exists() else None
+        if manifest is None:  # caches (synthetic emails, tasks) have no manifest: not training sets
+            continue
+        with f.open("rb") as fh:
+            rows = sum(1 for _ in fh)
+        out.append({"name": f.stem, "rows": rows, "size_bytes": f.stat().st_size, "modified": f.stat().st_mtime,
+                    "sources": {k: {"rows": v.get("rows"), "license": v.get("license"), "dataset": v.get("dataset")}
+                                for k, v in (manifest.get("sources") or {}).items()},
+                    "teacher": manifest.get("teacher")})
+    return sorted(out, key=lambda d: d["modified"], reverse=True)
+
+
+def validate(kind: str, p: dict[str, Any], home: Path, *, pipeline: bool, has_jev_key: bool) -> dict[str, Any]:
+    """Normalised, validated parameters for a job (raises JobError)."""
+    if kind not in KINDS:
+        raise JobError(f"kind must be one of {', '.join(KINDS)}")
+    p = dict(p or {})
+    if kind == "data":
+        name = _slug(p, "name")
+        if dataset_path(home, name).exists():
+            raise JobError(f"dataset {name!r} already exists; pick another name")
+        sources = p.get("sources") or list(DATA_SOURCES)
+        if not isinstance(sources, list) or not sources or any(s not in DATA_SOURCES for s in sources):
+            raise JobError(f"sources must be a non-empty subset of {', '.join(DATA_SOURCES)}")
+        rows = p.get("source_rows") or {}
+        if not isinstance(rows, dict) or any(k not in sources for k in rows):
+            raise JobError("source_rows keys must be among the chosen sources")
+        out = {"name": name, "sources": sources,
+               "per_source": _int(p, "per_source", 1200, 10, 100_000),
+               "source_rows": {k: _int(rows, k, 0, 10, 100_000) for k in rows},
+               "phishing_rows": _int(p, "phishing_rows", 0, 0, 50_000),
+               "synthetic_email": _int(p, "synthetic_email", 0, 0, 10_000),
+               "subtle_share": _float(p, "subtle_share", 0.4, 0.0, 1.0),
+               "synthetic_tasks": _int(p, "synthetic_tasks", 0, 0, 10_000),
+               "layout_variation": _float(p, "layout_variation", 0.75, 0.0, 1.0),
+               "seed": _int(p, "seed", 7, 0, 2**31 - 1)}
+        if (out["synthetic_email"] or out["synthetic_tasks"]) and not pipeline:
+            raise JobError("synthetic rows are written by the triage LLM: start the pipeline profile "
+                           "(S1_PIPELINE=1, docker compose --profile pipeline up -d) or set them to 0")
+        return out
+    if kind == "label":
+        src = _slug(p, "dataset")
+        if not dataset_path(home, src).exists():
+            raise JobError(f"no dataset named {src!r}")
+        name = _slug(p, "name", f"{src}-clef"[:64])
+        if dataset_path(home, name).exists():
+            raise JobError(f"dataset {name!r} already exists; pick another name")
+        return {"dataset": src, "name": name, "alpha": _float(p, "alpha", 0.5, 0.0, 1.0),
+                "batch": _int(p, "batch", 8, 1, 64), "limit": _int(p, "limit", 0, 0, 10_000_000)}
+    if kind == "train":
+        ds = _slug(p, "dataset")
+        if not dataset_path(home, ds).exists():
+            raise JobError(f"no dataset named {ds!r}")
+        name = _slug(p, "name")
+        if (home / "models" / name).exists():
+            raise JobError(f"a model named {name!r} already exists")
+        base = p.get("base", "MoritzLaurer/deberta-v3-large-zeroshot-v2.0-c")
+        if not isinstance(base, str) or not HF_ID.match(base):
+            raise JobError("base must be a Hugging Face model id (org/name)")
+        return {"dataset": ds, "name": name, "base": base,
+                "lr": _float(p, "lr", 1e-5, 1e-7, 1e-3), "epochs": _float(p, "epochs", 1.0, 0.05, 20.0),
+                "batch_groups": _int(p, "batch_groups", 8, 1, 128), "max_length": _int(p, "max_length", 512, 64, 4096),
+                "max_pairs": _int(p, "max_pairs", 48, 4, 512), "seed": _int(p, "seed", 13, 0, 2**31 - 1)}
+    # bench
+    suites = p.get("suites") or ["modern2"]
+    engines = p.get("engines") or ["kenning"]
+    if not isinstance(suites, list) or any(s not in SUITES for s in suites):
+        raise JobError(f"suites must be a subset of {', '.join(SUITES)}")
+    if not isinstance(engines, list) or not engines or any(e not in ENGINES for e in engines):
+        raise JobError(f"engines must be a subset of {', '.join(ENGINES)}")
+    if "jev" in engines:
+        if not has_jev_key:
+            raise JobError("Jev needs TYPESAFE_API_KEY in .env")
+        if p.get("confirm_paid") is not True:
+            raise JobError("Jev requests are billed under your TypeSafe agreement: confirm_paid must be true")
+    if "local" in engines and not pipeline:
+        raise JobError("the 'local' engine reads the triage LLM: it needs the pipeline profile")
+    return {"suites": list(dict.fromkeys(suites)), "engines": list(dict.fromkeys(engines)),
+            "n": _int(p, "n", 50, 5, 1000), "repeat_check": _int(p, "repeat_check", 5, 0, 100),
+            "confirm_paid": p.get("confirm_paid") is True}
+
+
+def commands(kind: str, p: dict[str, Any], home: Path, clef_url: str) -> list[list[str]]:
+    """Argument lists for the subprocess jobs (data, label, bench)."""
+    cli = [sys.executable, "-m", "systemone_builder.cli"]
+    if kind == "data":
+        argv = cli + ["data", "--task", "multitask", "--out", str(dataset_path(home, p["name"])),
+                      "--sources", ",".join(p["sources"]), "--per-source", str(p["per_source"]),
+                      "--phishing-rows", str(p["phishing_rows"]), "--layout-variation", str(p["layout_variation"]),
+                      "--seed", str(p["seed"])]
+        if p["source_rows"]:
+            argv += ["--source-rows", ",".join(f"{k}={v}" for k, v in p["source_rows"].items())]
+        if p["synthetic_email"]:
+            argv += ["--synthetic-email", str(p["synthetic_email"]), "--subtle-share", str(p["subtle_share"])]
+        if p["synthetic_tasks"]:
+            argv += ["--synthetic-tasks", str(p["synthetic_tasks"])]
+        return [argv]
+    if kind == "label":
+        argv = cli + ["label", str(dataset_path(home, p["dataset"])), "--out", str(dataset_path(home, p["name"])),
+                      "--teacher-url", clef_url, "--teacher-name", "clef-flash",
+                      "--alpha", str(p["alpha"]), "--batch", str(p["batch"])]
+        if p["limit"]:
+            argv += ["--limit", str(p["limit"])]
+        return [argv]
+    if kind == "bench":
+        return [cli + ["bench", "--suite", s, "--engines", ",".join(p["engines"]), "-n", str(60 if s == "ood" else p["n"]),
+                       "--concurrency", "1", "--repeat-check", str(p["repeat_check"])] for s in p["suites"]]
+    raise JobError(f"{kind} does not run as a subprocess")
+
+
+# ------------------------------------------------------------------ runner
+class KenningJobs:
+    def __init__(self, rt: Runtime) -> None:
+        self.rt = rt
+        self.s = rt.settings
+        self._task: asyncio.Task[None] | None = None
+        self._proc: asyncio.subprocess.Process | None = None
+        self._current: dict[str, Any] | None = None
+        self._cancel = False
+
+    # ---- storage
+    @property
+    def home(self) -> Path:
+        return self.s.kenning_dir()
+
+    @property
+    def dir(self) -> Path:
+        return self.home / "jobs"
+
+    def _save(self, job: dict[str, Any]) -> None:
+        self.dir.mkdir(parents=True, exist_ok=True)
+        tmp = self.dir / f"{job['id']}.json.part"
+        tmp.write_text(json.dumps(job, indent=1))
+        tmp.replace(self.dir / f"{job['id']}.json")
+
+    def _log(self, job: dict[str, Any], line: str) -> None:
+        with (self.dir / f"{job['id']}.log").open("a", encoding="utf-8") as fh:
+            fh.write(line.rstrip("\n") + "\n")
+        m = STEP.search(line) or ROWS.search(line)
+        if m:
+            job["progress"] = {"done": int(m.group(1)), "total": int(m.group(2))}
+        if "full results:" in line:
+            job.setdefault("result", {}).setdefault("files", []).append(line.split("full results:", 1)[1].strip())
+
+    @property
+    def busy(self) -> bool:
+        return self._task is not None and not self._task.done()
+
+    def list(self, limit: int = 30) -> list[dict[str, Any]]:
+        if not self.dir.is_dir():
+            return []
+        jobs = []
+        for f in self.dir.glob("*.json"):
+            try:
+                jobs.append(json.loads(f.read_text()))
+            except (OSError, json.JSONDecodeError):
+                continue
+        return sorted(jobs, key=lambda j: j.get("created", 0), reverse=True)[:limit]
+
+    def get(self, job_id: str, tail: int = 200) -> dict[str, Any]:
+        if not re.fullmatch(r"[0-9a-f]{12}", job_id or ""):
+            raise JobError("invalid job id")
+        f = self.dir / f"{job_id}.json"
+        if not f.exists():
+            raise KeyError(job_id)
+        job = self._current if self._current and self._current["id"] == job_id else json.loads(f.read_text())
+        logf = self.dir / f"{job_id}.log"
+        lines = logf.read_text(encoding="utf-8", errors="replace").splitlines() if logf.exists() else []
+        return {**job, "log": lines[-tail:]}
+
+    def reconcile(self) -> None:
+        """At API start: jobs that were running when it stopped are interrupted."""
+        for job in self.list(1000):
+            if job.get("status") in ("queued", "running"):
+                job.update(status="interrupted", finished=time.time(),
+                           error="the API restarted while this job was running")
+                self._save(job)
+
+    # ---- control
+    def start(self, kind: str, params: dict[str, Any]) -> dict[str, Any]:
+        if self.busy:
+            raise JobError(f"another job is running ({self._current['kind']} {self._current['id']}); wait or cancel it")
+        if getattr(self.rt, "lifecycle", None) is not None and self.rt.lifecycle.busy:
+            raise JobError("a pipeline training cycle holds the GPU; wait for it to finish")
+        p = validate(kind, params, self.home, pipeline=self.s.pipeline, has_jev_key=bool(self.s.typesafe_api_key))
+        job = {"id": uuid.uuid4().hex[:12], "kind": kind, "params": p, "status": "queued", "created": time.time(),
+               "started": None, "finished": None, "progress": None, "result": {}, "error": None, "paused": []}
+        self._save(job)
+        self._current, self._cancel = job, False
+        self._task = asyncio.create_task(self._run(job))
+        return job
+
+    async def cancel(self, job_id: str) -> dict[str, Any]:
+        if not self._current or self._current["id"] != job_id or not self.busy:
+            raise JobError("that job is not running")
+        self._cancel = True
+        if self._proc and self._proc.returncode is None:
+            self._proc.terminate()
+        if self._current["kind"] == "train":
+            await self.rt.docker.stop(self.s.kenning_train_container, timeout_s=10)
+        return self._current
+
+    async def _run(self, job: dict[str, Any]) -> None:
+        job.update(status="running", started=time.time())
+        self._save(job)
+        try:
+            if job["kind"] == "train":
+                await self._train(job)
+            elif job["kind"] == "label":
+                await self._label(job)
+            else:
+                for argv in commands(job["kind"], job["params"], self.home, self.s.clef_url):
+                    await self._subprocess(job, argv)
+            job["status"] = "cancelled" if self._cancel else "succeeded"
+        except asyncio.CancelledError:
+            job.update(status="cancelled")
+            raise
+        except Exception as exc:  # noqa: BLE001 - every failure ends up on the job
+            job.update(status="cancelled" if self._cancel else "failed", error=str(exc))
+            self._log(job, f"[job] {'cancelled' if self._cancel else 'failed'}: {exc}")
+            if not self._cancel:
+                log.exception("kenning job %s failed", job["id"])
+        finally:
+            job["finished"] = time.time()
+            self._save(job)
+            self._proc = None
+            self._current = None if self._current is job else self._current
+
+    async def _subprocess(self, job: dict[str, Any], argv: list[str]) -> None:
+        if self._cancel:
+            raise JobError("cancelled")
+        self._log(job, "[job] $ " + " ".join(argv[1:]))
+        self._proc = await asyncio.create_subprocess_exec(
+            *argv, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
+        assert self._proc.stdout is not None
+        last_save = 0.0
+        async for raw in self._proc.stdout:
+            self._log(job, raw.decode(errors="replace"))
+            if time.monotonic() - last_save > 2:
+                self._save(job)
+                last_save = time.monotonic()
+        code = await self._proc.wait()
+        if code != 0:
+            raise JobError("cancelled" if self._cancel else f"{argv[3]} exited with code {code}")
+
+    # ---- GPU
+    @asynccontextmanager
+    async def _gpu(self, job: dict[str, Any], gpu: int, keep: str | None = None,
+                   free_mb: int | None = None) -> AsyncIterator[None]:
+        """Pause our services on ``gpu`` (except ``keep``), restart them afterwards."""
+        on_gpu = {self.s.kenning_container: self.s.kenning_gpu, self.s.clef_container: self.s.clef_gpu}
+        if self.s.pipeline:
+            on_gpu[self.s.student_container] = self.s.student_gpu
+        paused: list[str] = []
+        try:
+            for name, g in on_gpu.items():
+                if g != gpu or name == keep:
+                    continue
+                info = await self.rt.docker.status(name)
+                if info.status in ("running", "restarting"):
+                    self._log(job, f"[job] pausing {name} to free GPU {gpu}")
+                    await self.rt.docker.stop(name, timeout_s=60)
+                    paused.append(name)
+            job["paused"] = paused
+            self._save(job)
+            if free_mb:
+                status = await self.rt.gpu.wait_for_flush(gpu, self.s.vram_flush_threshold_mb, 180.0,
+                                                          required_free_mb=free_mb)
+                self._log(job, f"[job] GPU {gpu}: {status.memory_free_mb} MiB free")
+            yield
+        finally:
+            for name in paused:
+                try:
+                    self._log(job, f"[job] restarting {name}")
+                    await self.rt.docker.start(name)
+                except Exception as exc:  # noqa: BLE001
+                    self._log(job, f"[job] could not restart {name}: {exc} (start it with docker compose up -d)")
+
+    async def _label(self, job: dict[str, Any]) -> None:
+        try:
+            async with httpx.AsyncClient(timeout=5) as c:
+                (await c.get(f"{self.s.clef_url.rstrip('/')}/health")).raise_for_status()
+        except httpx.HTTPError:
+            raise JobError("Clef is not running: docker compose --profile clef up -d clef "
+                           "(it needs most of a 24 GB GPU)") from None
+        # Clef labelling in batches fills the GPU: pause the other services on it.
+        async with self._gpu(job, self.s.clef_gpu, keep=self.s.clef_container):
+            for argv in commands("label", job["params"], self.home, self.s.clef_url):
+                await self._subprocess(job, argv)
+
+    async def _train(self, job: dict[str, Any]) -> None:
+        p, s = job["params"], self.s
+        ws = s.workspace_container_path
+        out = f"{ws}/kenning/models/{p['name']}"
+        command = ["python", "-m", "systemone_builder.kenning.train",
+                   "--data", f"{ws}/kenning/datasets/{p['dataset']}.jsonl", "--out", out, "--base", p["base"],
+                   "--lr", str(p["lr"]), "--epochs", str(p["epochs"]), "--batch-groups", str(p["batch_groups"]),
+                   "--max-length", str(p["max_length"]), "--max-pairs", str(p["max_pairs"]), "--seed", str(p["seed"])]
+        env = {"PYTHONUNBUFFERED": "1", "HF_HOME": f"{ws}/hf_cache", "KENNING_HOME": f"{ws}/kenning",
+               "CUDA_DEVICE_ORDER": "PCI_BUS_ID", "NVIDIA_VISIBLE_DEVICES": str(s.kenning_gpu),
+               "CUDA_VISIBLE_DEVICES": s.kenning_cuda_device or str(s.kenning_gpu)}
+        token = _env("HF_TOKEN")
+        if token:
+            env["HF_TOKEN"] = token
+        spec = RunSpec(name=s.kenning_train_container, image=s.kenning_image, command=command, gpu=s.kenning_gpu,
+                       environment=env, volumes={s.workspace_host_path: {"bind": ws, "mode": "rw"}},
+                       shm_size="8g", mem_limit=s.kenning_train_mem_limit)
+        loop = asyncio.get_running_loop()
+
+        def on_log(line: str) -> None:
+            loop.call_soon_threadsafe(self._log, job, line)
+
+        async with self._gpu(job, s.kenning_gpu, free_mb=s.kenning_train_free_mb):
+            if self._cancel:
+                raise JobError("cancelled")
+            self._log(job, "[job] $ " + " ".join(command[2:]))
+            saver = asyncio.create_task(self._autosave(job))
+            try:
+                code = await self.rt.docker.run_to_completion(spec, on_log=on_log, timeout_s=12 * 3600)
+            finally:
+                saver.cancel()
+            await asyncio.sleep(0.1)
+        if code != 0:
+            raise JobError("cancelled" if self._cancel else f"training exited with code {code}")
+        summary = registry.summary(self.home, p["name"])
+        job["result"] = {"model": p["name"], "heldout": summary["heldout"]}
+
+    async def _autosave(self, job: dict[str, Any]) -> None:
+        while True:
+            await asyncio.sleep(3)
+            self._save(job)
+
+
+def _env(name: str) -> str | None:
+    import os
+
+    return os.environ.get(name) or None

@@ -5,7 +5,7 @@ Three roles, each reached through an adapter:
 | Role | Default | Purpose |
 |---|---|---|
 | `student` | vLLM serving the fine-tuned `Qwen/Qwen2.5-1.5B-Instruct` | the System-1 reflex model |
-| `triage` | vLLM serving `Qwen/Qwen2.5-14B-Instruct-AWQ` | synchronous fallback on GPU 1 |
+| `triage` | vLLM serving `Qwen/Qwen2.5-7B-Instruct` | synchronous fallback on GPU 1 |
 | `oracle` | Ollama `qwen3.8:27b` on the Mac | System-2 teacher, judge, vision, deep analysis |
 
 ## Configure
@@ -53,7 +53,7 @@ container too, so vLLM serves the same base until the first fine-tune lands.
 ### Writing a plugin
 
 ```python
-from systemone.adapters.base import Generation, ModelAdapter
+from systemone_builder.adapters.base import Generation, ModelAdapter
 
 class MLXAdapter(ModelAdapter):
     kind = "mlx"
@@ -64,7 +64,7 @@ class MLXAdapter(ModelAdapter):
 ```
 
 ```toml
-[project.entry-points."systemone.adapters"]
+[project.entry-points."systemone_builder.adapters"]
 mlx = "my_pkg.adapters:MLXAdapter"
 ```
 

@@ -16,7 +16,14 @@ export type Service = {
   url?: string;
   lifecycle_phase?: string;
 };
-export type ServicesSnapshot = { ts: number; operational: boolean; services: Service[] };
+export type ServicesSnapshot = {
+  ts: number;
+  operational: boolean;
+  services: Service[];
+  warnings?: string[];
+  /** false: Kenning-only stack (S1_PIPELINE off), no student / triage / oracle */
+  pipeline?: boolean;
+};
 
 const STATE: Record<string, { status: "good" | "warning" | "serious" | "critical" | "neutral"; label: string }> = {
   online: { status: "good", label: "online" },
@@ -30,6 +37,7 @@ const STATE: Record<string, { status: "good" | "warning" | "serious" | "critical
 
 const LABEL: Record<string, string> = {
   api: "API",
+  kenning: "Kenning · System One model",
   redis: "Redis (RAM datastore)",
   student: "Student · GPU 0",
   triage: "Triage · GPU 1",
@@ -40,7 +48,7 @@ export function useServices(intervalMs = 4000) {
   return usePoll<ServicesSnapshot>("/services", intervalMs);
 }
 
-const SHORT: Record<string, string> = { api: "API", redis: "Redis", student: "Student", triage: "Triage", oracle: "Oracle" };
+const SHORT: Record<string, string> = { api: "API", kenning: "Kenning", redis: "Redis", student: "Student", triage: "Triage", oracle: "Oracle" };
 
 const ICON: Record<string, [string, string]> = {
   good: ["●", "var(--good)"],

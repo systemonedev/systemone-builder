@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import json
 
-from systemone.config import Settings
-from systemone.datastore.store import JsonStore
-from systemone.domains.builtin import SECOPS
-from systemone.domains.registry import DomainRegistry
-from systemone.factory.dataset import DatasetStore, DPOPair, SFTSample
-from systemone.training.lifecycle import StudentLifecycleOrchestrator
+from systemone_builder.config import Settings
+from systemone_builder.datastore.store import JsonStore
+from systemone_builder.domains.builtin import SECOPS
+from systemone_builder.domains.registry import DomainRegistry
+from systemone_builder.factory.dataset import DatasetStore, DPOPair, SFTSample
+from systemone_builder.training.lifecycle import StudentLifecycleOrchestrator
 
 STATE = {"source": "suricata_eve", "src_ip": "192.168.1.150", "payload_snippet": "GET /../../../../etc/passwd HTTP/1.1"}
 ACTION = {"confidence_score": 0.99, "verdict": "SUSPICIOUS", "immediate_action": "DROP_AND_BLACKLIST_IP",

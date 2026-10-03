@@ -1,0 +1,14 @@
+# Container A (Unsloth QLoRA trainer) Python dependencies.
+#
+# NOT YET PINNED: no version set has been validated end to end on the
+# reference rig. After the first successful training cycle, the exact
+# versions that ran are recorded in workspace/runs/<run>/result.json
+# ("environment"). Copy them here as `name==version` to lock the image.
+unsloth
+unsloth_zoo
+trl
+datasets
+peft
+transformers
+bitsandbytes
+accelerate

@@ -19,6 +19,7 @@ dependencies = [
   "nvidia-ml-py>=12.535",
   "pyyaml>=6.0",
   "jsonschema>=4.21",
+  "huggingface_hub>=0.24",  # systemone publish
 ]
 
 [project.optional-dependencies]
@@ -27,13 +28,15 @@ dev = ["pytest>=8", "pytest-asyncio>=0.23"]
 train = ["unsloth", "trl", "datasets", "peft", "transformers"]
 
 [project.scripts]
-systemone = "systemone.cli:main"
+systemone = "systemone_builder.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["systemone*"]
 
 [tool.setuptools.package-data]
-"systemone.templates" = ["*.json"]
+"systemone_builder.templates" = ["*.json"]
+"systemone_builder.system_one" = ["suites/*.jsonl", "suites/*.json"]
+"systemone_builder.kenning" = ["LICENSE-Apache-2.0.txt"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
