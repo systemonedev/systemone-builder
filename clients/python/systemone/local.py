@@ -1,4 +1,4 @@
-"""Run an exported Kenning bundle in-process (``pip install "systemone[local]"``).
+"""Run an exported Kenning bundle in-process (``pip install "systemone-client[local]"``).
 
     from systemone import Kenning, Noul
 
@@ -95,7 +95,7 @@ class Kenning:
             import torch
             from transformers import AutoModelForSequenceClassification, AutoTokenizer
         except ImportError as exc:  # pragma: no cover - depends on the extra
-            raise ImportError('local inference needs: pip install "systemone[local]"') from exc
+            raise ImportError('local inference needs: pip install "systemone-client[local]"') from exc
         os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False

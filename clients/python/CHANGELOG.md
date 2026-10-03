@@ -5,7 +5,8 @@ All notable changes to the `systemone` package. Versions follow [SemVer](https:/
 
 ## 0.1.0 - unreleased
 
-First release.
+First release, published as `systemone-client` (`system-one` is an unrelated project); the import
+name is `systemone`.
 
 - `Client` and `AsyncClient` for any server speaking the System One wire format
   (`POST /v1/systemone`): Kenning, Clef, TypeSafe Jev.

@@ -39,7 +39,7 @@ NC_BASES = {"MoritzLaurer/ModernBERT-large-zeroshot-v2.0"}
 WEIGHTS_LICENCE = "apache-2.0"
 # Distillation teachers (``systemone label --teacher-name``): Hub id and licence of their outputs' source.
 TEACHERS = {"clef-flash": ("Cloudflare/clef-flash", "Apache-2.0")}
-INSTALL = 'pip install "systemone[local] @ git+https://github.com/systemonedev/systemone-builder#subdirectory=clients/python"'
+INSTALL = 'pip install "systemone-client[local]"'
 LICENCE_TEXT = Path(__file__).with_name("LICENSE-Apache-2.0.txt")
 WEIGHT_SUFFIXES = (".safetensors", ".bin")
 
