@@ -108,3 +108,7 @@ workspace/
 *.aof
 appendonlydir/
 *.tsbuildinfo
+
+# Source files the broad rules above would catch (models/, *.jsonl): keep them tracked
+!frontend/src/app/models/
+!backend/systemone_builder/system_one/suites/*.jsonl
