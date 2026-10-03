@@ -1,0 +1,13 @@
+SystemOne Builder
+Copyright 2026 Jesus Rodriguez and SystemOne Builder contributors
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Model weights are not part of this source distribution. Models you download or train
+carry their own licences. Each Kenning export bundle includes a NOTICE.md listing the
+base model and every training source with its licence.
+
+Kenning implements a wire format compatible with TypeSafe AI's System One API. This
+project is not affiliated with or endorsed by TypeSafe AI, and its models are not trained
+on TypeSafe outputs. "Clef" is a model by Cloudflare, used under Apache-2.0. This project
+is not affiliated with Cloudflare.
