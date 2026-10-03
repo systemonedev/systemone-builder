@@ -56,4 +56,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # the default (Kenning-only) stack and every optional profile must stay valid
       - run: docker compose config -q
+      - run: docker compose --profile pipeline --profile clef config -q
+    env:
+      S1_REDIS_PASSWORD: ci-only-not-a-secret

@@ -10,8 +10,9 @@ on TypeSafe outputs.
 ## How it works
 
 The model is a non-generative cross-encoder (default base:
-[`MoritzLaurer/ModernBERT-large-zeroshot-v2.0`](https://huggingface.co/MoritzLaurer/ModernBERT-large-zeroshot-v2.0),
-395M parameters, Apache-2.0). Each candidate answer becomes a hypothesis scored against the state:
+[`MoritzLaurer/deberta-v3-large-zeroshot-v2.0-c`](https://huggingface.co/MoritzLaurer/deberta-v3-large-zeroshot-v2.0-c),
+435M parameters, MIT, no non-commercial data; v0.1 and v0.2 used ModernBERT-large-zeroshot-v2.0).
+Each candidate answer becomes a hypothesis scored against the state:
 
 | Question | Hypotheses | Answer |
 |---|---|---|
@@ -28,7 +29,7 @@ kernels, and the softmax runs in float64. The same request gives bit-identical a
 
 ## Serving, the UI and your own code
 
-The compose service `kenning` (GPU 0, about 1–2 GB of VRAM) serves `POST /v1/systemone` on
+The compose service `kenning` (GPU 0, about 2 GB of VRAM; part of the default stack) serves `POST /v1/systemone` on
 `127.0.0.1:8093`, and the API exposes it as `POST /api/v1/systemone`
 (`S1_SYSTEM_ONE_BACKEND=kenning`, the default; `logprob` switches to an LLM's label-token readout).
 
@@ -53,11 +54,11 @@ In the dashboard:
 docker compose exec api systemone data --task phishing -n 4000
 # multi-task rows: six public labelled datasets plus phishing (see "Training data" below)
 docker compose exec api systemone data --task multitask --per-source 1200
-# free GPU 0, train, restore
-docker compose stop student kenning
+# free GPU 0 (with the pipeline profile, also stop the student), train, restore
+docker compose stop kenning
 docker compose run --rm --no-deps kenning python -m systemone_builder.kenning.train \
   --data /workspace/kenning/datasets/multitask-train.jsonl --out /workspace/kenning/models/kenning-large-v0.1 --max-length 512
-docker compose up -d --no-deps student
+docker compose up -d --no-deps student         # pipeline profile only
 # serve it: Models page -> Activate (or S1_KENNING_MODEL in .env), or start the service:
 docker compose up -d --no-deps kenning
 ```

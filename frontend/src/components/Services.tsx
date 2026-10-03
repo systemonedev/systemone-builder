@@ -16,7 +16,14 @@ export type Service = {
   url?: string;
   lifecycle_phase?: string;
 };
-export type ServicesSnapshot = { ts: number; operational: boolean; services: Service[]; warnings?: string[] };
+export type ServicesSnapshot = {
+  ts: number;
+  operational: boolean;
+  services: Service[];
+  warnings?: string[];
+  /** false: Kenning-only stack (S1_PIPELINE off), no student / triage / oracle */
+  pipeline?: boolean;
+};
 
 const STATE: Record<string, { status: "good" | "warning" | "serious" | "critical" | "neutral"; label: string }> = {
   online: { status: "good", label: "online" },

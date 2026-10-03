@@ -9,7 +9,7 @@ import { notify } from "@/utils/notify";
 import { ActivityBanner, LiveIndicator, Toasts, type Activity } from "@/components/Activity";
 import { ServiceList, useServices } from "@/components/Services";
 
-const NAV: { section: string; hint?: string; items: { href: string; label: string }[] }[] = [
+const NAV: { section: string; hint?: string; pipeline?: boolean; items: { href: string; label: string }[] }[] = [
   {
     section: "Kenning",
     items: [
@@ -22,6 +22,7 @@ const NAV: { section: string; hint?: string; items: { href: string; label: strin
   {
     section: "Legacy pipeline",
     hint: "The original generative path: vLLM student → triage → oracle",
+    pipeline: true,
     items: [
       { href: "/telemetry", label: "Telemetry" },
       { href: "/routing", label: "Fast-Slow Routing" },
@@ -146,7 +147,10 @@ export function Shell({ children }: { children: ReactNode }) {
           </button>
         </div>
         <nav className={`${open ? "block" : "hidden"} px-2 pb-3 md:block`}>
-          {NAV.map((group) => (
+          {NAV.filter(
+            // The legacy pages need the generative pipeline (S1_PIPELINE + compose profile "pipeline").
+            (g) => !g.pipeline || services.data?.pipeline !== false || g.items.some((n) => path.startsWith(n.href)),
+          ).map((group) => (
             <div key={group.section} className="mb-3">
               <div className="px-3 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wider text-ink-3" title={group.hint}>
                 {group.section}

@@ -376,3 +376,17 @@ def test_micro_batches_bound_pairs_and_keep_groups_whole():
     assert [g for run in runs for g in run] == groups  # order kept, nothing dropped
     assert all(sum(len(g["hyps"]) for g in run) <= 48 or len(run) == 1 for run in runs)
     assert [len(run) for run in runs] == [2, 1, 1, 2]  # an oversized group runs alone
+
+
+def test_pipeline_actions_are_refused_when_the_pipeline_is_off():
+    from types import SimpleNamespace
+
+    from fastapi import HTTPException
+
+    from systemone_builder.api.routes.training import pipeline_on
+
+    with pytest.raises(HTTPException) as exc:
+        pipeline_on(SimpleNamespace(settings=SimpleNamespace(pipeline=False)))
+    assert exc.value.status_code == 409 and "S1_PIPELINE" in exc.value.detail
+    rt = SimpleNamespace(settings=SimpleNamespace(pipeline=True))
+    assert pipeline_on(rt) is rt

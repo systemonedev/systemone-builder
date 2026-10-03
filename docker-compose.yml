@@ -1,6 +1,12 @@
-# systemone-builder stack (2x RTX 3090). Runs on native Linux or on Docker
-# Desktop / WSL2. Memory limits, ports and offload sizes are all overridable
-# from .env - see .env.example.
+# SystemOne Builder stack. Runs on native Linux or on Docker Desktop / WSL2.
+# Memory limits, ports and GPUs are all overridable from .env - see .env.example.
+#
+#   docker compose up -d                       Kenning + API + dashboard (one GPU)
+#   docker compose --profile clef up -d clef   + Cloudflare Clef (teacher/benchmark, 24 GB GPU)
+#   docker compose --profile pipeline up -d    + the generative pipeline: vLLM student and
+#                                                triage, LoRA trainer, quickstart (2 GPUs);
+#                                                also set S1_PIPELINE=1
+# (or set COMPOSE_PROFILES=pipeline in .env to make the pipeline part of every `up`)
 name: systemone
 
 x-s1-env: &s1-env
@@ -68,11 +74,11 @@ services:
     mem_limit: ${S1_API_MEM_LIMIT:-4g}
     depends_on:
       redis: { condition: service_healthy }
-      student: { condition: service_healthy }
-      # started, not healthy: the triage wait keeps model loads sequential, but
-      # a failing triage must not keep the API/dashboard (and its status
-      # panel) from coming up.
-      triage: { condition: service_started }
+      kenning: { condition: service_started }
+      # Only with the "pipeline" profile (required: false). Started, not healthy,
+      # for triage: a failing triage must not keep the API/dashboard down.
+      student: { condition: service_healthy, required: false }
+      triage: { condition: service_started, required: false }
     deploy:
       resources:
         reservations:
@@ -88,6 +94,7 @@ services:
   # Idempotent: on later `docker compose up` runs it detects the loaded
   # dataset / finished run and exits. Disable with S1_QUICKSTART=0.
   quickstart:
+    profiles: ["pipeline"]
     image: systemone/api:latest
     container_name: systemone-quickstart
     env_file: [{ path: .env, required: false }]
@@ -135,6 +142,7 @@ services:
 
   # ------------------------------------------ GPU 0: Container B (student)
   student:
+    profiles: ["pipeline"]
     build:
       context: .
       dockerfile: docker/student/Dockerfile
@@ -189,7 +197,8 @@ services:
   # typed questions -> calibrated answers) at POST /v1/systemone. The served
   # model is the one activated in the Models page (kenning/active.json in the
   # workspace volume), else S1_KENNING_MODEL: a trained model directory, or a
-  # Hugging Face cross-encoder for zero-shot use (the default). ~2 GB of VRAM.
+  # Hugging Face cross-encoder for zero-shot use. The default is a zero-shot
+  # model with no non-commercial data in its training (MIT). ~2-3 GB of VRAM.
   kenning:
     build:
       context: .
@@ -197,7 +206,7 @@ services:
     image: systemone/kenning:latest
     container_name: systemone-kenning
     environment:
-      KENNING_MODEL: ${S1_KENNING_MODEL:-MoritzLaurer/ModernBERT-large-zeroshot-v2.0}
+      KENNING_MODEL: ${S1_KENNING_MODEL:-MoritzLaurer/deberta-v3-large-zeroshot-v2.0-c}
       KENNING_HOME: /workspace/kenning
       HF_HOME: /workspace/hf_cache
       HF_TOKEN: ${HF_TOKEN:-}
@@ -228,7 +237,7 @@ services:
   # ---------------------- optional: Cloudflare Clef (Apache-2.0), teacher/benchmark
   # Off by default: `docker compose --profile clef up -d clef`. Clef-flash is
   # ~19 GB in bf16 and needs a 24 GB GPU to itself (stop the student first).
-  # Used by `systemone bench --engines clef` and `systemone label --engine clef`.
+  # Used by `systemone bench --engines clef` and `systemone label` (the teacher).
   clef:
     profiles: ["clef"]
     image: systemone/kenning:latest
@@ -267,6 +276,7 @@ services:
   # Starts only after the student is healthy, so two engines never load
   # weights and allocate memory at the same time.
   triage:
+    profiles: ["pipeline"]
     image: systemone/student:latest   # same vLLM launcher, triage role
     container_name: systemone-triage
     env_file: [{ path: .env, required: false }]
@@ -319,6 +329,7 @@ services:
   # (name: systemone-trainer) through the Docker Engine API, only after the
   # student has been stopped and GPU 0 VRAM verified empty.
   trainer:
+    profiles: ["pipeline"]
     build:
       context: .
       dockerfile: docker/trainer/Dockerfile

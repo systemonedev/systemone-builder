@@ -56,3 +56,27 @@ async def test_kenning_service_status_online_and_offline(monkeypatch):
     monkeypatch.setattr(httpx, "AsyncClient", client(refuse))
     down = await monitor._kenning()
     assert down["state"] == "offline"
+
+
+async def test_kenning_only_snapshot_leaves_out_the_pipeline():
+    from systemone_builder.config import Settings
+    from systemone_builder.orchestrator import services
+
+    class Rt:
+        settings = Settings(_env_file=None, pipeline=False)
+
+    monitor = services.ServiceMonitor.__new__(services.ServiceMonitor)
+    monitor.rt, monitor._cache = Rt(), None
+
+    async def online(name):
+        return {"name": name, "state": "online"}
+
+    async def student(*_):
+        raise AssertionError("the student must not be probed without the pipeline")
+
+    monitor._kenning = lambda: online("kenning")
+    monitor._redis = lambda: online("redis")
+    monitor._model_service = student
+    snap = await monitor.snapshot()
+    assert [s["name"] for s in snap["services"]] == ["api", "kenning", "redis"]
+    assert snap["operational"] and snap["pipeline"] is False

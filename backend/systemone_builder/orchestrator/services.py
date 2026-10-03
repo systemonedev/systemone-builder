@@ -146,6 +146,15 @@ class ServiceMonitor:
         if self._cache and time.monotonic() - self._cache[0] < max_age_s:
             return self._cache[1]
         s = self.rt.settings
+        api = {"name": "api", "state": "online", "detail": "operational"}
+        if not s.pipeline:
+            # Kenning-only stack: the student, triage and oracle are not part of it.
+            kenning, redis = await asyncio.gather(self._kenning(), self._redis())
+            services = [api, kenning, redis]
+            snap = {"ts": time.time(), "services": services, "warnings": [], "pipeline": False,
+                    "operational": all(x["state"] == "online" for x in services)}
+            self._cache = (time.monotonic(), snap)
+            return snap
         kenning, student, triage, oracle, redis = await asyncio.gather(
             self._kenning(),
             self._model_service("student", s.student_container),
@@ -153,14 +162,13 @@ class ServiceMonitor:
             self._oracle(),
             self._redis(),
         )
-        api = {"name": "api", "state": "online", "detail": "operational"}
         services = [api, kenning, redis, student, triage, oracle]
         up = {x["name"] for x in (student, triage) if x["state"] == "online"}
         try:
             warnings = placement_warnings(self.rt.gpu.snapshot(), {"student": s.student_gpu, "triage": s.triage_gpu}, up)
         except Exception:
             warnings = []
-        snap = {"ts": time.time(), "services": services, "warnings": warnings,
+        snap = {"ts": time.time(), "services": services, "warnings": warnings, "pipeline": True,
                 "operational": all(x["state"] == "online" for x in services) and not warnings}
         self._cache = (time.monotonic(), snap)
         return snap

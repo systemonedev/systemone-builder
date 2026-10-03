@@ -119,6 +119,10 @@ class Settings(BaseSettings):
     confidence_logprob_weight: float = 0.5
 
     # --------------------------------------------------------- training
+    # The generative distillation pipeline (vLLM student + triage, LoRA training,
+    # data factory; compose profile "pipeline"). Off: the API never starts the
+    # student or trains on its own, and the stack is Kenning-only (one GPU).
+    pipeline: bool = False
     lora_rank: int = 16
     lora_alpha: int = 32
     train_epochs: int = 1

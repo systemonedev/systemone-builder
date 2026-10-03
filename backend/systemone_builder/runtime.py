@@ -133,7 +133,7 @@ class Runtime:
                 log.warning("auto-DPO skipped: %s", exc)
 
     async def _maybe_auto_train(self, domain_ids: set[str]) -> None:
-        if not self.settings.auto_train or self.lifecycle.busy:
+        if not (self.settings.pipeline and self.settings.auto_train) or self.lifecycle.busy:
             return
         for did in sorted(domain_ids):
             stats = await self.datasets.stats(did)
@@ -193,6 +193,9 @@ class Runtime:
         await self._load_calibrations()
         self.escalations.start()
         self.telemetry.start()
+        if not self.settings.pipeline:
+            log.info("pipeline off (S1_PIPELINE): Kenning-only; not managing the student or the data factory")
+            return
         await self._restore_lifecycle()
         if self.settings.auto_factory:
             self.factory.start()

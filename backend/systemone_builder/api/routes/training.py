@@ -15,6 +15,14 @@ from systemone_builder.training.lifecycle import LifecycleError
 router = APIRouter(tags=["factory", "training"])
 
 
+def pipeline_on(rt: Runtime = Depends(get_rt)) -> Runtime:
+    """Guard for actions that drive the vLLM student (compose profile "pipeline")."""
+    if not rt.settings.pipeline:
+        raise HTTPException(409, "the generative pipeline is off: set S1_PIPELINE=1 and start the "
+                                 "\"pipeline\" compose profile (docker compose --profile pipeline up -d)")
+    return rt
+
+
 def _domain(rt: Runtime, domain_id: str):
     try:
         return rt.domains.get(domain_id)
@@ -35,7 +43,7 @@ async def factory_status(rt: Runtime = Depends(get_rt)) -> dict[str, Any]:
 
 
 @router.post("/factory/start")
-async def factory_start(rt: Runtime = Depends(get_rt)) -> dict[str, Any]:
+async def factory_start(rt: Runtime = Depends(pipeline_on)) -> dict[str, Any]:
     rt.factory.start()
     return {"running": rt.factory.running}
 
@@ -47,7 +55,7 @@ async def factory_stop(rt: Runtime = Depends(get_rt)) -> dict[str, Any]:
 
 
 @router.post("/factory/synthesize", status_code=202)
-async def synthesize(req: SynthesizeRequest, rt: Runtime = Depends(get_rt)) -> dict[str, Any]:
+async def synthesize(req: SynthesizeRequest, rt: Runtime = Depends(pipeline_on)) -> dict[str, Any]:
     _domain(rt, req.domain)
     return {"job_id": rt.factory.launch_synthesis(req.domain, req.scenarios, req.per_scenario)}
 
@@ -117,7 +125,7 @@ async def training_status(rt: Runtime = Depends(get_rt)) -> dict[str, Any]:
 
 
 @router.post("/training/run", status_code=202)
-async def training_run(req: TrainRequest, rt: Runtime = Depends(get_rt)) -> dict[str, Any]:
+async def training_run(req: TrainRequest, rt: Runtime = Depends(pipeline_on)) -> dict[str, Any]:
     _domain(rt, req.domain)
     try:
         cfg = rt.lifecycle.start_cycle(req.domain, req.mode)
@@ -141,7 +149,7 @@ class RollbackRequest(BaseModel):
 
 
 @router.post("/training/rollback")
-async def training_rollback(req: RollbackRequest, rt: Runtime = Depends(get_rt)) -> dict[str, Any]:
+async def training_rollback(req: RollbackRequest, rt: Runtime = Depends(pipeline_on)) -> dict[str, Any]:
     try:
         return await rt.lifecycle.rollback_to(req.run_id)
     except LifecycleError as exc:
@@ -149,7 +157,7 @@ async def training_rollback(req: RollbackRequest, rt: Runtime = Depends(get_rt))
 
 
 @router.post("/training/recover")
-async def training_recover(rt: Runtime = Depends(get_rt)) -> dict[str, Any]:
+async def training_recover(rt: Runtime = Depends(pipeline_on)) -> dict[str, Any]:
     try:
         return await rt.lifecycle.recover()
     except LifecycleError as exc:

@@ -55,7 +55,7 @@ def _wrap(fn, *a):  # noqa: ANN001, ANN002, ANN202
 @router.get("/kenning/status")
 async def status(rt: Runtime = Depends(get_rt)) -> dict[str, Any]:
     return {"server": await _kenning_health(rt), "active": registry.active(_home(rt)),
-            "home": str(_home(rt))}
+            "home": str(_home(rt)), "pipeline": rt.settings.pipeline}
 
 
 @router.get("/kenning/models")
