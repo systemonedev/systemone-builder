@@ -1,7 +1,9 @@
 # SystemOne Builder stack. Runs on native Linux or on Docker Desktop / WSL2.
 # Memory limits, ports and GPUs are all overridable from .env - see .env.example.
 #
-#   docker compose up -d                       Kenning + API + dashboard (one GPU)
+#   docker compose up -d                       Kenning + API + dashboard (one GPU), pulling the
+#                                              published images (S1_IMAGE_TAG, default main);
+#                                              `docker compose build` builds them from source instead
 #   docker compose --profile clef up -d clef   + Cloudflare Clef (teacher/benchmark, 24 GB GPU)
 #   docker compose --profile pipeline up -d    + the generative pipeline: vLLM student and
 #                                                triage, LoRA trainer, quickstart (2 GPUs);
@@ -51,7 +53,7 @@ services:
     build:
       context: .
       dockerfile: docker/api/Dockerfile
-    image: systemone/api:latest
+    image: ghcr.io/systemonedev/systemone-api:${S1_IMAGE_TAG:-main}
     container_name: systemone-api
     env_file: [{ path: .env, required: false }]
     environment:
@@ -61,6 +63,8 @@ services:
       # The API refuses to start on a non-loopback bind without a real S1_API_KEY.
       S1_BIND_ADDR: ${S1_BIND_ADDR:-127.0.0.1}
       S1_PUBLIC_API_PORT: ${S1_API_PORT:-8090}
+      # Train page jobs run in the same Kenning image the kenning service uses
+      S1_KENNING_IMAGE: ghcr.io/systemonedev/systemone-kenning:${S1_IMAGE_TAG:-main}
     # The Docker socket lets the orchestrator stop/start the student and launch
     # the trainer. It is root-equivalent on the Docker VM: keep S1_API_KEY set
     # and the API bound to 127.0.0.1 unless you need LAN access.
@@ -95,7 +99,7 @@ services:
   # dataset / finished run and exits. Disable with S1_QUICKSTART=0.
   quickstart:
     profiles: ["pipeline"]
-    image: systemone/api:latest
+    image: ghcr.io/systemonedev/systemone-api:${S1_IMAGE_TAG:-main}
     container_name: systemone-quickstart
     env_file: [{ path: .env, required: false }]
     environment:
@@ -114,7 +118,7 @@ services:
     build:
       context: .
       dockerfile: docker/dashboard/Dockerfile
-    image: systemone/dashboard:latest
+    image: ghcr.io/systemonedev/systemone-dashboard:${S1_IMAGE_TAG:-main}
     container_name: systemone-dashboard
     # The browser only talks to the dashboard. Its gateway (frontend/gateway.mjs)
     # forwards /api/v1 to the API over the compose network and adds S1_API_KEY
@@ -203,7 +207,7 @@ services:
     build:
       context: .
       dockerfile: docker/kenning/Dockerfile
-    image: systemone/kenning:latest
+    image: ghcr.io/systemonedev/systemone-kenning:${S1_IMAGE_TAG:-main}
     container_name: systemone-kenning
     environment:
       KENNING_MODEL: ${S1_KENNING_MODEL:-MoritzLaurer/deberta-v3-large-zeroshot-v2.0-c}
@@ -240,7 +244,7 @@ services:
   # Used by `systemone bench --engines clef` and `systemone label` (the teacher).
   clef:
     profiles: ["clef"]
-    image: systemone/kenning:latest
+    image: ghcr.io/systemonedev/systemone-kenning:${S1_IMAGE_TAG:-main}
     container_name: systemone-clef
     command: ["python", "-m", "systemone_builder.kenning.clef_serve"]
     environment:

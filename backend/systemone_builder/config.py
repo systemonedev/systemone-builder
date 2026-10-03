@@ -107,7 +107,7 @@ class Settings(BaseSettings):
     clef_gpu: int = 0
     kenning_container: str = "systemone-kenning"
     clef_container: str = "systemone-clef"
-    kenning_image: str = "systemone/kenning:latest"
+    kenning_image: str = "ghcr.io/systemonedev/systemone-kenning:main"  # compose sets it from S1_IMAGE_TAG
     kenning_train_container: str = "systemone-kenning-train"
     kenning_train_mem_limit: str = "32g"
     # Free VRAM (MiB) a training run needs once the GPU's services are paused

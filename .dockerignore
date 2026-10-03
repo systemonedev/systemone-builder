@@ -7,3 +7,24 @@ var
 frontend/node_modules
 frontend/.next
 .git
+
+# Never send secrets or private files into a build context
+.env
+.env.*
+**/.env
+**/.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+**/id_rsa*
+system_specification_sheet.md
+**/system_specification_sheet.md
+# Local data and caches
+**/*.safetensors
+**/*.bin
+**/node_modules
+.pytest_cache
+**/.pytest_cache
+**/*.egg-info
+.claude

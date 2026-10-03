@@ -31,6 +31,12 @@ cp .env.example .env                 # set S1_REDIS_PASSWORD (openssl rand -hex 
 docker compose up -d                 # Redis, API, dashboard, Kenning
 ```
 
+The first `up` downloads the prebuilt images from
+[GitHub Container Registry](https://github.com/orgs/systemonedev/packages)
+(`ghcr.io/systemonedev/systemone-{api,dashboard,kenning}`; Kenning's is the large one, it includes
+PyTorch and CUDA). `S1_IMAGE_TAG` chooses the build: `main` by default, or a release version. To build
+from your checkout instead: `docker compose build api dashboard kenning`.
+
 - Dashboard: **http://localhost:3090**. *Try it* takes your own questions, *Models* trains and
   exports, *Connect* has client code.
 - Kenning: `127.0.0.1:8093`. The API, with interactive docs at `/docs`, is on `127.0.0.1:8090`.
@@ -139,6 +145,11 @@ cd frontend && npx next dev -p 3001 &    # Next.js dev server on a private port
 # dashboard on :3000 (via the gateway) against `systemone serve` on :8000
 S1_NEXT_URL=http://localhost:3001 S1_API_INTERNAL_URL=http://localhost:8000 PORT=3000 node gateway.mjs
 ```
+
+Images: `docker compose build api dashboard kenning` builds them locally under the same names the
+stack runs. CI publishes them from `main` (`.github/workflows/images.yml`) after
+`.github/scan-image.sh` checks each one for credential files, key patterns and secret environment
+variables.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) (data rules, DCO sign-off), [SECURITY.md](SECURITY.md)
 and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
