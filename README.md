@@ -18,6 +18,9 @@ SystemOne Builder is the open toolkit for these models. With it you can:
 
 The flagship model is **Kenning**.
 
+[![Open the Kenning demo in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/systemonedev/systemone-builder/blob/main/notebooks/kenning_demo.ipynb)
+Try Kenning in your browser on Colab's free GPU: one click, no install, any text or JSON you like.
+
 ```text
 state + questions ──▶ Kenning (cross-encoder, ~2 GB VRAM) ──▶ {"phish": {"noul": 0.82}}  ──▶ act / close / escalate
 ```
