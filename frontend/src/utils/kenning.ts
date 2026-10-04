@@ -82,11 +82,14 @@ export type EngineReport = {
   latency_ms: { p50: number | null; p95: number | null; mean: number | null };
   determinism: { checked: number; identical: number };
   questions: Record<string, QuestionMetrics>;
+  /** multi-task suites: mean per-task accuracy */
+  macro_accuracy?: number | null;
 };
 export type BenchSummary = { file: string; ts: number; suite: string; description?: string; gate?: string; items: number; reports: EngineReport[] };
 
 /** id: the `--suite` value; name: the suite name stored in result files. */
 export const SUITES: { id: string; name: string; label: string; note: string }[] = [
+  { id: "multi", name: "multi", label: "Multi-task (14 tasks)", note: "~680 items over 14 decision tasks never trained on; headline: macro accuracy" },
   { id: "modern2", name: "modern_email_2", label: "Modern emails 2", note: "20 held-out modern emails, incl. calm credential lures" },
   { id: "modern", name: "modern_email", label: "Modern emails", note: "20 hand-written modern emails (training scenarios were designed after seeing it)" },
   { id: "phishing", name: "phishing", label: "Phishing dataset", note: "zefang-liu/phishing-email-dataset, balanced sample" },

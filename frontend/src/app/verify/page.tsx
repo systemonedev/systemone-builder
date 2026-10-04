@@ -21,6 +21,7 @@ function accuracies(r: EngineReport): { text: string; title: string } {
   const qs = Object.entries(r.questions).filter(([, q]) => q.n > 0 && q.accuracy != null);
   const title = qs.map(([k, q]) => `${k}: ${fmtNum(q.accuracy, 3)}`).join("\n");
   if (qs.length === 0) return { text: "–", title };
+  if (r.macro_accuracy != null) return { text: `${fmtNum(r.macro_accuracy, 3)} macro, ${qs.length} tasks`, title };
   const variants = qs.every(([k]) => k.includes("@"));
   if (variants && qs.length > 1) {
     const v = qs.map(([, q]) => q.accuracy as number);

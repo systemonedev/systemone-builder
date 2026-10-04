@@ -65,6 +65,9 @@ def cmd_bench(a: argparse.Namespace) -> int:
             suite = await phishing_suite(a.n, a.seed, s.kenning_dir() / "bench_cache")
         elif a.suite == "ood":
             suite = await ood_suite(a.n, a.seed, s.kenning_dir() / "bench_cache")
+        elif a.suite == "multi":
+            from systemone_builder.system_one.multitask_suite import multitask_suite
+            suite = await multitask_suite(a.n, a.seed, s.kenning_dir() / "bench_cache")
         elif a.suite == "layouts":
             suite = await layout_suite(a.n, a.seed, s.kenning_dir() / "bench_cache")
         elif a.suite == "modern":
@@ -353,7 +356,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("doctor", help="check hardware, Docker, Redis and model endpoints").set_defaults(fn=cmd_doctor)
     b = sub.add_parser("bench", aliases=["s1-bench"], help="benchmark System One engines (Kenning, local LLM, opt-in Jev) on a labelled suite")
     b.add_argument("--suite", default="phishing",
-                   help="'phishing', 'ood' (tasks never trained on; -n per task), 'layouts' (the phishing emails in 4 layouts), 'modern' (20 hand-written modern emails) or a JSONL file of {id, state, labels}")
+                   help="'phishing', 'multi' (14 decision tasks never trained on; -n per task), 'ood' (tasks never trained on; -n per task), 'layouts' (the phishing emails in 4 layouts), 'modern' (20 hand-written modern emails) or a JSONL file of {id, state, labels}")
     b.add_argument("--questions", help="questions JSON for a JSONL suite ({qid: {type, instructions, criteria}})")
     b.add_argument("--gate", help="noul question used for automation metrics (default: first noul)")
     b.add_argument("--engines", default="kenning,local",

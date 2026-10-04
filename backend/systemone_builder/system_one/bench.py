@@ -377,6 +377,8 @@ def format_reports(suite: Suite, reports: list[dict[str, Any]]) -> str:
     row("latency p50 / p95 (ms)", [f"{_f(r['latency_ms']['p50'], '{:.0f}')} / {_f(r['latency_ms']['p95'], '{:.0f}')}" for r in reports])
     row("throughput (items/s)", [_f(r["throughput_per_s"], "{:.2f}") for r in reports])
     row("identical on repeat", [f"{r['determinism']['identical']}/{r['determinism']['checked']}" for r in reports])
+    if any("macro_accuracy" in r for r in reports):
+        row("MACRO ACCURACY (tasks)", [_f(r.get("macro_accuracy")) for r in reports])
     for qid, q in suite.questions.items():
         m = [r["questions"][qid] for r in reports]
         lines.append(f"[{qid}] ({q.type})")
@@ -424,6 +426,10 @@ async def run_benchmark(suite: Suite, engines: list[SystemOneEngine], *, concurr
     for engine in engines:  # one engine at a time: no contention between them
         results, wall = await run_engine(engine, suite, concurrency)
         det = await determinism(engine, suite, results, repeat_check) if repeat_check else {"checked": 0, "identical": 0}
-        out.reports.append(engine_report(engine.name, suite, results, wall, hi, lo, det))
+        report = engine_report(engine.name, suite, results, wall, hi, lo, det)
+        if len(suite.questions) > 3:  # multi-task suites: one headline number
+            from systemone_builder.system_one.multitask_suite import macro_average
+            report["macro_accuracy"] = macro_average(report)
+        out.reports.append(report)
         out.raw[engine.name] = results
     return out
