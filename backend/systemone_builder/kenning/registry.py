@@ -357,12 +357,20 @@ def publish(home: Path, name: str, repo_id: str, token: str, results_dir: Path |
     return str(url)
 
 
-def export_bundle(home: Path, name: str) -> Path:
-    """Build (or reuse) ``exports/<name>.zip`` and return its path."""
+def export_bundle(home: Path, name: str, results_dir: Path | None = None) -> Path:
+    """Build (or reuse) ``exports/<name>.zip`` and return its path.
+
+    With ``results_dir`` the model card lists the model's recorded benchmarks, as
+    ``publish`` does.
+    """
     src = model_dir(home, name)
     out = home / "exports" / f"{name}.zip"
-    # rebuilt when the model or the card/NOTICE generator (this file) is newer than the bundle
-    newest = max([f.stat().st_mtime for f in src.rglob("*") if f.is_file()] + [Path(__file__).stat().st_mtime])
+    # rebuilt when the model, the card/NOTICE generator (this file) or a benchmark result
+    # is newer than the bundle
+    stamps = [f.stat().st_mtime for f in src.rglob("*") if f.is_file()] + [Path(__file__).stat().st_mtime]
+    if results_dir and results_dir.is_dir():
+        stamps += [f.stat().st_mtime for f in results_dir.glob("*bench-*.json")]
+    newest = max(stamps)
     if out.exists() and out.stat().st_mtime > newest:
         return out
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -381,7 +389,7 @@ def export_bundle(home: Path, name: str) -> Path:
                 sums.append(f"{h.hexdigest()}  {arc}")
         if not (src / CONFIG_FILE).exists() and (src / "s1_config.json").exists():
             z.writestr(f"{name}/{CONFIG_FILE}", (src / "s1_config.json").read_text())
-        z.writestr(f"{name}/README.md", model_card(name, s))
+        z.writestr(f"{name}/README.md", model_card(name, s, recorded_benchmarks(results_dir, name)))
         z.writestr(f"{name}/NOTICE.md", notice(s))
         if weights_licence(s)[0] == WEIGHTS_LICENCE and LICENCE_TEXT.exists():
             z.writestr(f"{name}/LICENSE", LICENCE_TEXT.read_text(encoding="utf-8"))

@@ -104,14 +104,14 @@ async def delete(name: str, rt: Runtime = Depends(get_rt)) -> dict[str, Any]:
 @router.post("/kenning/models/{name}/export")
 async def export(name: str, rt: Runtime = Depends(get_rt)) -> dict[str, Any]:
     t0 = time.perf_counter()
-    path = await asyncio.to_thread(_wrap, registry.export_bundle, _home(rt), name)
+    path = await asyncio.to_thread(_wrap, registry.export_bundle, _home(rt), name, _results_dir(rt))
     return {"name": name, "file": path.name, "size_bytes": path.stat().st_size,
             "seconds": round(time.perf_counter() - t0, 1), "download": f"/api/v1/kenning/models/{name}/export"}
 
 
 @router.get("/kenning/models/{name}/export")
 async def download(name: str, rt: Runtime = Depends(get_rt)) -> FileResponse:
-    path = await asyncio.to_thread(_wrap, registry.export_bundle, _home(rt), name)
+    path = await asyncio.to_thread(_wrap, registry.export_bundle, _home(rt), name, _results_dir(rt))
     return FileResponse(path, media_type="application/zip", filename=path.name)
 
 

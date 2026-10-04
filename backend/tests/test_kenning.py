@@ -492,3 +492,16 @@ def test_card_and_notice_credit_the_distillation_teacher(tmp_path):
     for text in (registry.model_card("kenning-c", s), registry.notice(s)):
         assert "`Cloudflare/clef-flash` (Apache-2.0)" in text and "50% original label + 50% teacher" in text
     assert "( / )" not in registry.notice(s)
+
+
+def test_export_bundle_card_lists_recorded_benchmarks(tmp_path):
+    import zipfile
+
+    from systemone_builder.kenning import registry
+
+    _clean_model(tmp_path, "kenning-c")
+    res = tmp_path / "eval_results"
+    _bench_file(res, "bench-modern_email_2-1.json", "kenning-c", 1.0, 0.75)
+    with zipfile.ZipFile(registry.export_bundle(tmp_path, "kenning-c", res)) as z:
+        card = z.read("kenning-c/README.md").decode()
+    assert "## Benchmarks" in card and "| Modern emails 2 (held out) | 20 | 0.750 |" in card
