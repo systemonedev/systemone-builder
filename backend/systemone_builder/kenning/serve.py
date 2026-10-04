@@ -11,8 +11,8 @@ registry (``$KENNING_HOME/models``) or the configured default, never paths.
 
 Which model is served: ``$KENNING_HOME/active.json`` (written when a model is
 activated in the Models page) if it names an existing model, else
-``KENNING_MODEL`` (a model directory or a Hugging Face cross-encoder id; default
-the ModernBERT zero-shot base). ``KENNING_MAX_LENGTH`` bounds tokens per pair.
+``KENNING_MODEL`` (a model directory or a Hugging Face model id; default
+``systemonedev/kenning-large-v0.4``, downloaded with its calibration). ``KENNING_MAX_LENGTH`` bounds tokens per pair.
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ from typing import AsyncIterator
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-from systemone_builder.kenning.model import DEFAULT_BASE, Kenning
+from systemone_builder.kenning.model import DEFAULT_MODEL, Kenning
 from systemone_builder.system_one.contract import SystemOneRequest, SystemOneResponse
 
 _model: Kenning | None = None
@@ -40,7 +40,7 @@ def home() -> Path:
 
 
 def default_model() -> str:
-    return os.environ.get("KENNING_MODEL") or os.environ.get("S1_MODEL") or DEFAULT_BASE
+    return os.environ.get("KENNING_MODEL") or os.environ.get("S1_MODEL") or DEFAULT_MODEL
 
 
 def resolve(name: str) -> str:

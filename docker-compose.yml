@@ -200,9 +200,9 @@ services:
   # Non-generative cross-encoder answering the System One wire format (state +
   # typed questions -> calibrated answers) at POST /v1/systemone. The served
   # model is the one activated in the Models page (kenning/active.json in the
-  # workspace volume), else S1_KENNING_MODEL: a trained model directory, or a
-  # Hugging Face cross-encoder for zero-shot use. The default is a zero-shot
-  # model with no non-commercial data in its training (MIT). ~2-3 GB of VRAM.
+  # workspace volume), else S1_KENNING_MODEL: a trained model directory or a
+  # Hugging Face model id. The default is the published kenning-large-v0.4
+  # (Apache-2.0), downloaded once with its calibration. ~2 GB of VRAM.
   kenning:
     build:
       context: .
@@ -210,7 +210,7 @@ services:
     image: ghcr.io/systemonedev/systemone-kenning:${S1_IMAGE_TAG:-main}
     container_name: systemone-kenning
     environment:
-      KENNING_MODEL: ${S1_KENNING_MODEL:-MoritzLaurer/deberta-v3-large-zeroshot-v2.0-c}
+      KENNING_MODEL: ${S1_KENNING_MODEL:-systemonedev/kenning-large-v0.4}
       KENNING_HOME: /workspace/kenning
       HF_HOME: /workspace/hf_cache
       HF_TOKEN: ${HF_TOKEN:-}

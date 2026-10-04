@@ -31,11 +31,17 @@ cp .env.example .env                 # set S1_REDIS_PASSWORD (openssl rand -hex 
 docker compose up -d                 # Redis, API, dashboard, Kenning
 ```
 
-The first `up` downloads the prebuilt images from
-[GitHub Container Registry](https://github.com/orgs/systemonedev/packages)
-(`ghcr.io/systemonedev/systemone-{api,dashboard,kenning}`; Kenning's is the large one, it includes
-PyTorch and CUDA). `S1_IMAGE_TAG` chooses the build: `main` by default, or a release version. To build
-from your checkout instead: `docker compose build api dashboard kenning`.
+The first `up` downloads, once:
+
+| Download | Size | From |
+|---|---|---|
+| `systemone-kenning` image (includes PyTorch and CUDA) | 4.3 GB | [GitHub Container Registry](https://github.com/orgs/systemonedev/packages) |
+| `systemone-api` and `systemone-dashboard` images | 0.1 GB each | GitHub Container Registry |
+| `kenning-large-v0.4` weights | 0.9 GB | [Hugging Face](https://huggingface.co/systemonedev/kenning-large-v0.4) |
+| `redis` image | ~0.05 GB | Docker Hub |
+
+`S1_IMAGE_TAG` chooses the image build: `main` by default, or a release version. To build from your
+checkout instead: `docker compose build api dashboard kenning`.
 
 - Dashboard: **http://localhost:3090**. *Try it* takes your own questions, *Models* trains and
   exports, *Connect* has client code.
@@ -63,12 +69,12 @@ answer = Client("http://localhost:8093").system_one(
 print(answer.nouls["billing"].noul)        # 0.93
 ```
 
-Out of the box, Kenning serves a zero-shot base model with no non-commercial data in its lineage,
-[`deberta-v3-large-zeroshot-v2.0-c`](https://huggingface.co/MoritzLaurer/deberta-v3-large-zeroshot-v2.0-c)
-(MIT). The trained flagship is published under Apache-2.0:
-[**systemonedev/kenning-large-v0.4**](https://huggingface.co/systemonedev/kenning-large-v0.4). Serve it with
-`S1_KENNING_MODEL=systemonedev/kenning-large-v0.4` in `.env`, or load it in-process with
-`Kenning.from_pretrained("systemonedev/kenning-large-v0.4")`.
+Out of the box, Kenning serves the trained flagship,
+[**systemonedev/kenning-large-v0.4**](https://huggingface.co/systemonedev/kenning-large-v0.4) (Apache-2.0),
+downloaded from Hugging Face on first start together with its calibration. Activate a model you
+trained on the *Models* page, or set `S1_KENNING_MODEL` in `.env` to serve another one. To use it
+without a server: `Kenning.from_pretrained("systemonedev/kenning-large-v0.4")` (`pip install
+"systemone-client[local]"`).
 
 ## Kenning results
 

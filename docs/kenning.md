@@ -38,7 +38,7 @@ In the dashboard:
 - **Models** lists every trained model in the workspace volume (`kenning/models/`) with its
   held-out results and training data. **Activate** hot-swaps the served model (no restart) and
   persists the choice in `kenning/active.json`; without it, `S1_KENNING_MODEL` (a model directory or
-  a Hugging Face cross-encoder id, default the zero-shot base) is served. **Export** builds a zip
+  a Hugging Face model id, default `systemonedev/kenning-large-v0.4`) is served. **Export** builds a zip
   with the weights, tokenizer, `kenning.json`, a model card, `NOTICE.md` with the licences of the
   base model and every training source, and `SHA256SUMS`.
 - **Train** runs the whole recipe without a terminal:
