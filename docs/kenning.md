@@ -119,6 +119,50 @@ metadata) to measure layout sensitivity; `--suite modern` is 20 hand-written sho
 (evaluation only, never trained on). Engines: `kenning` (this model), `jev` (opt-in TypeSafe Jev with
 your own key, `TYPESAFE_API_KEY`), `local` (an LLM's label-token readout), `llm` (an LLM writing JSON).
 
+### Multi-task suite (`--suite multi`)
+
+The headline benchmark for a general decision model: 14 tasks, ~50 class-balanced items each (~680),
+from held-out splits of permissively licensed datasets that Kenning is not trained on. Items are fetched
+at run time with a fixed seed and cached (`bench_cache/multi-n50-seed42.json`); nothing is redistributed.
+The report adds the **macro accuracy**: the mean of per-task accuracy (exact level for the score task).
+Tasks, sources and licences are in `system_one/multitask_suite.py`.
+
+```bash
+docker compose exec api systemone bench --suite multi --engines kenning,clef -n 50 --concurrency 1
+```
+
+Baseline (October 2026, one RTX 3090 each, items one at a time). Clef is the development target. Jev is
+compared again once Kenning matches or beats Clef.
+
+| Task (dataset) | Type | Kenning v0.4 | Clef-flash | Gap |
+|---|---|---|---|---|
+| **Macro accuracy (14 tasks)** | | **0.754** | **0.838** | **−8.4** |
+| Answerable from passage (BoolQ) | noul | 0.660 | 0.880 | −22.0 |
+| Claim supported by evidence (SciTail) | noul | 0.620 | 0.940 | −32.0 |
+| Financial sentiment (twitter-financial-news) | choice | 0.771 | 0.812 | −4.1 |
+| Toxic comment (wiki_toxic) | noul | 0.840 | 0.900 | −6.0 |
+| Counterfactual statement (amazon_counterfactual) | noul | 0.760 | 0.860 | −10.0 |
+| Prompt injection (deepset) | noul | **0.720** | 0.620 | +10.0 |
+| Jailbreak attempt (jailbreak-classification) | noul | 0.640 | 0.860 | −22.0 |
+| Fine-grained emotion (go_emotions, 6) | choice | 0.792 | 0.917 | −12.5 |
+| Toxicity level (real-toxicity-prompts, 3 levels) | score | 0.646 | 0.646 | 0 |
+| Encyclopedia topic (dbpedia, 6) | choice | 0.958 | 1.000 | −4.2 |
+| Banking intent (banking77, 8) | choice | 0.979 | 1.000 | −2.1 |
+| SMS spam | noul | 0.840 | 0.900 | −6.0 |
+| Emotion (6) | choice | **0.521** | 0.500 | +2.1 |
+| News topic (ag_news) | choice | 0.812 | 0.896 | −8.4 |
+| Latency p50 | | 33 ms | 141 ms | |
+
+Both engines were deterministic (5/5 repeats identical). What it says:
+- **Kenning's biggest gaps are reasoning over a supplied text**: whether a passage answers a question
+  (−22) or supports a claim (−32). The clean training recipe left out BoolQ (CC-BY-SA), and its NLI data
+  is phrased differently from these tasks. That points at training data for evidence and passage
+  questions.
+- **Jailbreak detection (−22)** and **fine-grained emotion (−12.5)** are the next gaps. Prompt injection
+  is already a Kenning strength (+10 over Clef).
+- **Routing and topic tasks are nearly solved** by both (≥ 0.96).
+- Kenning answers about 4× faster. Matching Clef's macro accuracy at Kenning's speed is the v0.5 goal.
+
 ## Results so far
 
 | Model | Training data | Held-out accuracy (zero-shot → trained) | Held-out ECE (calibrated) |

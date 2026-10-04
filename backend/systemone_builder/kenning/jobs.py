@@ -41,7 +41,7 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 KINDS = ("data", "label", "train", "bench")
-SUITES = ("modern2", "modern", "phishing", "layouts", "ood")
+SUITES = ("multi", "modern2", "modern", "phishing", "layouts", "ood")
 ENGINES = ("kenning", "clef", "jev", "local")
 DATA_SOURCES = ("amazon", "dbpedia", "clinc", "boolq", "nli", "civil")
 SLUG = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
@@ -194,7 +194,7 @@ def commands(kind: str, p: dict[str, Any], home: Path, clef_url: str) -> list[li
             argv += ["--limit", str(p["limit"])]
         return [argv]
     if kind == "bench":
-        return [cli + ["bench", "--suite", s, "--engines", ",".join(p["engines"]), "-n", str(60 if s == "ood" else p["n"]),
+        return [cli + ["bench", "--suite", s, "--engines", ",".join(p["engines"]), "-n", str(60 if s == "ood" else 50 if s == "multi" else p["n"]),
                        "--concurrency", "1", "--repeat-check", str(p["repeat_check"])] for s in p["suites"]]
     raise JobError(f"{kind} does not run as a subprocess")
 
