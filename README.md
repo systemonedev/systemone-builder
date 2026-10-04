@@ -11,7 +11,9 @@ fast, deterministic reflex in front of slower reasoning:
 
 SystemOne Builder is the open toolkit for these models. With it you can:
 - **serve** one locally behind the `POST /v1/systemone` wire format;
-- **train** your own from permissively licensed data and distilled soft labels;
+- **train** your own: a general multi-task model, one for your own problem (agent guardrails, claims
+  intake, moderation, phishing...), or both, from permissively licensed data, teacher-written cases,
+  your own labelled data and distilled soft labels;
 - **benchmark** it against other System One models, for calibration and safe automation as well
   as accuracy;
 - **ship** it as a bundle with a model card and licence notice.
@@ -19,7 +21,7 @@ SystemOne Builder is the open toolkit for these models. With it you can:
 The flagship model is **Kenning**.
 
 ```text
-state + questions ──▶ Kenning (cross-encoder, ~2 GB VRAM) ──▶ {"phish": {"noul": 0.82}}  ──▶ act / close / escalate
+state + questions ──▶ Kenning (cross-encoder, ~2 GB VRAM) ──▶ {"outage": {"noul": 0.76}}  ──▶ act / close / escalate
 ```
 
 ## Quickstart (one NVIDIA GPU)
@@ -43,15 +45,18 @@ from your checkout instead: `docker compose build api dashboard kenning`.
 
 ```bash
 curl -s localhost:8093/v1/systemone -H 'content-type: application/json' -d '{
-  "state": {"from": "it-support@examp1e-corp.com", "subject": "Password expires today",
-            "body": "Keep your password: sign in at http://examp1e-corp.com.verify-login.io"},
+  "state": {"ticket": "Our checkout page has returned 500 errors for all customers since 9:05.",
+            "customer": {"plan": "enterprise"}},
   "questions": {
-    "phish":   {"type": "noul",   "instructions": "Is this email a phishing attempt?"},
-    "urgency": {"type": "score",  "instructions": "How urgent does the sender make it sound?",
-                "criteria": ["none", "low", "medium", "high"]},
-    "route":   {"type": "choice", "instructions": "Which team should handle it?",
-                "criteria": {"security": null, "it_helpdesk": null, "finance": null, "none": null}}}}'
+    "outage":   {"type": "noul",   "instructions": "Is the customer reporting an outage?"},
+    "priority": {"type": "score",  "instructions": "How urgent is this ticket?",
+                 "criteria": ["low", "medium", "high", "critical"]},
+    "team":     {"type": "choice", "instructions": "Which team should handle it?",
+                 "criteria": {"billing": null, "engineering": null, "account": null, "sales": null}}}}'
 ```
+
+Every answer is one of your options with a probability: here `outage` 0.76, `priority` about 1.8
+on the 0–3 scale, `team` engineering.
 
 From Python ([`clients/python`](clients/python), `pip install ./clients/python`):
 
@@ -75,36 +80,86 @@ Out of the box, Kenning serves a zero-shot base model with no non-commercial dat
 Benchmarks run with `systemone bench`. The full method, data and caveats are in
 [docs/kenning.md](docs/kenning.md).
 
-| | Kenning v0.4 (local) | [Clef-flash](https://blog.cloudflare.com/clef-decision-models/) (local) | TypeSafe Jev (hosted) |
+**The headline: general decisions** (`--suite general`, 1,328 held-out items, 30 questions in 7
+families, macro accuracy). Clef is the development target. Jev is compared again once Kenning matches
+Clef.
+
+| Family | Kenning v0.4 | [Clef-flash](https://blog.cloudflare.com/clef-decision-models/) |
+|---|---|---|
+| **All 30 questions (macro)** | **0.625** | **0.813** |
+| Text: evidence, sentiment, toxicity, injection, intent, topic (14) | 0.754 | 0.841 |
+| Conversations (1) | 0.958 | 1.000 |
+| Answer quality (2) | 0.377 | 0.447 |
+| Agent decisions: tool calls, task completion (3) | 0.553 | 0.793 |
+| Records: rules over JSON with numbers and dates (7) | 0.535 | 0.857 |
+| Tables (1) | 0.480 | 0.860 |
+| Logs (2) | 0.290 | 0.740 |
+| Latency p50 / GPU memory (one RTX 3090) | 34 ms / ~2 GB | 149 ms / ~18 GB |
+
+Kenning is close to Clef on text, about 20 times smaller and 4 times faster, and behind on
+structured state: records, tables, agent steps and long logs (it reads 512 tokens per option). That
+gap is what the next version is for. Until then, train it on your own problem (below) and measure it
+on your data.
+
+<details><summary>Email suites (regression checks)</summary>
+
+| | Kenning v0.4 | Clef-flash | TypeSafe Jev (hosted) |
 |---|---|---|---|
 | Held-out modern emails: accuracy | 0.75 | 0.90 | 0.90 |
 | Held-out modern emails: phishing auto-closed as safe | **0** | 0 | 0 |
 | Phishing dataset (50) | 0.78 | 0.96 | 0.96 |
 | Out of domain: spam / emotion / news | 0.917 / 0.583 / 0.867 | 0.900 / 0.600 / 0.950 | 0.967 / 0.583 / 0.933 |
-| Latency p50 (one RTX 3090) | 33–70 ms | 220–290 ms | ~150 ms (network) |
-| GPU memory | ~2 GB | ~18 GB | – |
 
-Kenning is about 20 times smaller than Clef and several times faster, and it is calibrated
-conservatively: when it automates a decision it was right in every suite except one spam message.
-It is still behind on subtle real-world phishing, so keep a person in the loop for those.
+When Kenning automates a decision it was right in every suite except one spam message. It is behind on
+subtle real-world phishing, so keep a person in the loop for those.
+</details>
 
 ## Train your own
 
+The **Train** page does all of this from the dashboard, and **Verify** benchmarks the result. From the
+command line:
+
+**For your own problem.** Describe it once and a teacher LLM writes labelled cases; or bring your own
+labelled data; or both. Out of the box, v0.4 is unsure on agent steps (asked whether an agent should
+check with the user before switching them to a $499 plan, it says 0.42), which is the kind of gap a
+few thousand cases close.
+
 ```bash
-docker compose exec api systemone data --task multitask --per-source 1200      # build training rows
+# built-in specs: computer_use, insurance_claim, chat_moderation (or write your own)
+docker compose exec api systemone problems
+# 3,000 teacher-written cases (each checked blind), your own labelled data (validated line by
+# line), and general data so the model stays good at everything else
+docker compose exec api systemone data --out /data/workspace/kenning/datasets/agent-v1.jsonl \
+  --problem computer_use=3000 --phishing-rows 0 --per-source 1200 \
+  --import /data/workspace/my-labels.jsonl --import-licence "CC-BY-4.0"
+```
+
+- A **problem spec** is a small JSON file: the state's fields and every question with all its answers
+  ([format](docs/kenning.md#train-for-your-own-problem)). Save your own on the Train page or pass
+  `--problem path/to/spec.json`.
+- The teacher is the pipeline's triage model, or any OpenAI-compatible server
+  (`--teacher-url http://host:11434/v1 --teacher-model <name>`). A stronger teacher keeps more cases.
+- 10% of each problem and import is **held out** and appears on Verify as its own suite, so you
+  measure the model on the problem you trained it for.
+- `systemone calibrate <model> --data <labelled.jsonl> --write` refits the temperatures on your data,
+  so its probabilities are honest there (accuracy unchanged).
+
+**Then distil, train, measure and share:**
+
+```bash
 docker compose --profile clef up -d clef                                        # optional teacher
-docker compose exec api systemone label /workspace/kenning/datasets/<rows>.jsonl --alpha 0.5 --batch 8
+docker compose exec api systemone label /data/workspace/kenning/datasets/<rows>.jsonl --alpha 0.5 --batch 8
 docker compose run --rm --no-deps kenning python -m systemone_builder.kenning.train \
   --data /workspace/kenning/datasets/<rows>.jsonl --out /workspace/kenning/models/my-model
-docker compose exec api systemone bench --suite modern2 --engines kenning,clef
+docker compose exec api systemone bench --suite general --engines kenning,clef
 docker compose exec api systemone publish my-model --org <your-hf-org>              # share it (Apache-2.0 models)
 ```
 
 Training fits in 24 GB. A run on ~30k rows takes 40 minutes to 2 hours on an RTX 3090.
 [docs/kenning.md](docs/kenning.md) covers:
 - data sources and their licences;
+- problem specs, imports, hold-outs and calibration;
 - synthetic data and distillation from Clef (Apache-2.0);
-- calibration;
 - every benchmark suite;
 - how to compare with TypeSafe Jev using your own key (opt-in; Jev outputs are never used for
   training).

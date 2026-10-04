@@ -109,6 +109,96 @@ onto the three question types and writes a licence manifest next to the JSONL:
 Class questions are asked with the true and a wrong class equally often, and genre questions across
 sources ("is this a product review?" of an encyclopedia article) are mostly "no".
 
+### Train for your own problem
+
+A general model is a starting point. For a specific problem, say gating a computer-use agent's
+actions, triaging insurance claims or moderating a chat, add cases for that problem to the training
+set. You can describe the problem and have a teacher LLM write cases, bring your own labelled data, or
+both. Keep some general data in the mix (`--per-source`) so the model doesn't lose its general skill.
+
+**Problem specs** (`kenning/problems.py`). A spec names the state's fields and lists every question
+with all its answers, each described:
+
+```json
+{
+  "name": "computer_use",
+  "title": "Computer-use agent: check the next action",
+  "writes": "one step of a computer-use agent operating a web browser or desktop app for a user",
+  "state": {"fields": {"goal": "the user's task", "screen": "what is visible now",
+                       "history": "the previous actions", "proposed_action": "the next action"}},
+  "questions": [
+    {"id": "needs_confirmation", "ask": ["Should the agent ask the user before taking this action?"],
+     "labels": {"yes": "spends money, sends, deletes, shares personal data", "no": "reading, navigating, drafting"}},
+    {"id": "risk", "ask": ["How risky is the proposed action?"], "ordinal": true,
+     "labels": {"low": "harmless, easy to undo", "medium": "inconvenient to undo", "high": "irreversible or costly"}}
+  ],
+  "constraints": [{"if": {"risk": "high"}, "then": {"needs_confirmation": "yes"}}]
+}
+```
+
+- `state` is `{"fields": {...}}` for a record (1–12 named fields) or `{"text": "<key>"}` for one text.
+- Yes/no questions become nouls, `"ordinal": true` questions become scores, and the rest become
+  choices. Training rows also rephrase each question as "is the answer X?".
+- `constraints` rule out combinations that can't happen, so the teacher is never asked to write one.
+- Built in: `computer_use`, `insurance_claim`, `chat_moderation` (`systemone problems`). Save your own
+  on the Train page, or pass a path: `--problem my_spec.json=2000`.
+
+**How cases are written.**
+1. For each case, answers are drawn at random (respecting the constraints), and the teacher writes a
+   case that has them. Every label is known by construction, never guessed.
+2. With the **blind check** (on by default), the teacher then answers the questions about its own case
+   without seeing the intended answers. The case is kept only if every answer matches.
+3. Writing continues until the requested number of cases is kept, up to 5 attempts per case.
+4. The log reports how many failed the check. A teacher that keeps fewer than 20% is the wrong teacher
+   for the problem.
+
+The teacher is the pipeline's triage model, or any OpenAI-compatible server (`--teacher-url`,
+`--teacher-model`, key in `S1_TEACHER_API_KEY`). In a test on `computer_use`, Qwen2.5-7B kept 23% of
+its cases. A larger teacher keeps more and writes better ones. Labelling the dataset with Clef
+afterwards (`systemone label`) reports how often a second model agrees, per source. Check the
+teacher's licence: its outputs become your training data.
+
+**Importing your own data** (`kenning/importer.py`). JSONL, one example per line, in one of two formats:
+- training rows: `{"state", "questions", "targets"}`. Targets are hard (0/1, an option, a level index)
+  or soft (P(yes), `{option: p}`).
+- labelled items: `{"state", "labels"}`, with the questions in `<file>.questions.json` next to the file.
+
+Every line is checked against the System One contract first, and the first errors are reported with
+their line numbers. On the Train page, uploads ask for a licence, which goes into the dataset manifest
+and the model card.
+
+**Hold-out suites.** By default (`--holdout 0.1`), 10% of each problem and import, and at least 20
+items, is held out before any training row is written. Each is saved as a benchmark suite with one
+fixed question per id (`<dataset>.holdout/`). Verify lists it under *Your problems*. From the command
+line:
+
+```bash
+docker compose exec api systemone bench --engines kenning,clef \
+  --suite /data/workspace/kenning/datasets/agent-v1.holdout/problem-computer_use.jsonl \
+  --questions /data/workspace/kenning/datasets/agent-v1.holdout/problem-computer_use.questions.json
+```
+
+Teacher-written hold-outs measure how well the student learned the teacher's labels. For a decision
+that matters, also label a few hundred real cases yourself and import them; their hold-out is the
+honest number.
+
+**Calibrating on your data** (`kenning/calibrate.py`).
+- Temperatures are fitted on the training distribution. On different data, the probabilities drift.
+- `systemone calibrate` asks the served model the questions in your labelled file. It recovers each
+  option's score from the returned probabilities and refits one temperature per question type.
+- A temperature never changes which answer wins, so accuracy stays the same and only the probabilities
+  move.
+
+```bash
+docker compose exec api systemone calibrate my-model --data /data/workspace/my-labels.jsonl          # report only
+docker compose exec api systemone calibrate my-model --data /data/workspace/my-labels.jsonl --write  # save
+docker compose exec api systemone calibrate systemonedev/kenning-large-v0.4 \
+  --data /data/workspace/my-labels.jsonl --write --save-as kenning-v0.4-mine                        # a calibrated copy
+```
+
+The model must be the one currently served. The old temperatures are kept in `kenning.json` under
+`calibration_history`. Activate the model again to serve the new ones.
+
 ## Benchmarks
 
 `systemone bench --suite phishing` uses 50 unseen, balanced emails from the phishing dataset;
@@ -378,7 +468,7 @@ v0.4 combines the two fixes v0.3 pointed to:
   (`systemone label --alpha 0.5`).
 
 ```bash
-docker compose exec api systemone label /workspace/kenning/datasets/clean-v3-train.jsonl \
+docker compose exec api systemone label /data/workspace/kenning/datasets/clean-v3-train.jsonl \
   --out /workspace/kenning/datasets/clean-v3-train-clef.jsonl --alpha 0.5 --batch 8
 docker compose run --rm --no-deps kenning python -m systemone_builder.kenning.train \
   --data /workspace/kenning/datasets/clean-v3-train-clef.jsonl --out /workspace/kenning/models/kenning-large-v0.4 \

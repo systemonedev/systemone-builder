@@ -120,9 +120,14 @@ def _prompt(task: Task, labels: dict[str, str], style: str) -> str:
 
 def rows_for(task: Task, text: str, labels: dict[str, str], rng: random.Random) -> dict[str, Any]:
     """Questions for one generated text, with targets from the requested labels."""
+    return {"state": {task.state_key: text}, **questions_for(task.attrs, labels, rng)}
+
+
+def questions_for(attrs: list[Attr], labels: dict[str, str], rng: random.Random) -> dict[str, Any]:
+    """Varied questions about one case (noul, choice, score or "is it X?"), with targets from its labels."""
     qs: dict[str, Any] = {}
     targets: dict[str, Any] = {}
-    for attr in task.attrs:
+    for attr in attrs:
         truth = labels[attr.name]
         names = list(attr.labels)
         instr = rng.choice(attr.question)
@@ -143,7 +148,7 @@ def rows_for(task: Task, text: str, labels: dict[str, str], rng: random.Random) 
             ask = truth if rng.random() < 0.5 else rng.choice([n for n in names if n != truth])
             qs[attr.name] = {"type": "noul", "instructions": f"{instr.rstrip('?')} - is the answer \"{ask}\"?"}
             targets[attr.name] = int(ask == truth)
-    return {"state": {task.state_key: text}, "questions": qs, "targets": targets}
+    return {"questions": qs, "targets": targets}
 
 
 async def generate(base_url: str, model: str, per_task: int, seed: int, concurrency: int = 32,

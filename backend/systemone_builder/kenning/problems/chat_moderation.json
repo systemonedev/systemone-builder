@@ -1,0 +1,77 @@
+{
+  "name": "chat_moderation",
+  "title": "Community chat moderation",
+  "description": "Moderate messages in a gaming or community chat: allowed or not, why, and what to do.",
+  "writes": "a single message posted in an online gaming or hobby community chat",
+  "state": {
+    "text": "message"
+  },
+  "questions": [
+    {
+      "id": "violates_rules",
+      "ask": [
+        "Does this message break typical community rules?",
+        "Should a moderator act on this message?"
+      ],
+      "labels": {
+        "yes": "harassment, hate, threats, doxxing, scams or spam",
+        "no": "fine, including banter, mild swearing and criticism"
+      }
+    },
+    {
+      "id": "category",
+      "ask": [
+        "What kind of message is this?"
+      ],
+      "labels": {
+        "ok": "ordinary chat",
+        "harassment": "insults or pile-ons aimed at a person",
+        "hate": "attacks on a group",
+        "scam_or_spam": "links, giveaways, account trading, ads",
+        "personal_info": "someone's real name, address or contact"
+      }
+    },
+    {
+      "id": "action",
+      "ordinal": true,
+      "ask": [
+        "What should the moderator do?"
+      ],
+      "labels": {
+        "none": "leave it",
+        "warn": "remove and warn",
+        "mute": "remove and mute for a while",
+        "ban": "remove and ban"
+      }
+    }
+  ],
+  "constraints": [
+    {
+      "if": {
+        "violates_rules": "no"
+      },
+      "then": {
+        "category": "ok",
+        "action": "none"
+      }
+    },
+    {
+      "if": {
+        "violates_rules": "yes"
+      },
+      "then": {
+        "category": [
+          "harassment",
+          "hate",
+          "scam_or_spam",
+          "personal_info"
+        ],
+        "action": [
+          "warn",
+          "mute",
+          "ban"
+        ]
+      }
+    }
+  ]
+}
