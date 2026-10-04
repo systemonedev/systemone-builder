@@ -43,7 +43,10 @@ from systemone_builder.system_one.contract import (
 CONFIG_FILE = "kenning.json"
 LEGACY_CONFIG_FILES = ("s1_config.json",)  # written by models trained before the Kenning rename
 TEMPLATE_VERSION = 1
-DEFAULT_BASE = "MoritzLaurer/ModernBERT-large-zeroshot-v2.0"
+# Served when nothing else is configured: the published, calibrated Kenning (Apache-2.0).
+DEFAULT_MODEL = "systemonedev/kenning-large-v0.4"
+# Starting point for training: a zero-shot NLI model with no non-commercial data (MIT).
+DEFAULT_BASE = "MoritzLaurer/deberta-v3-large-zeroshot-v2.0-c"
 
 
 def hypotheses(q: Question) -> tuple[list[str], list[Any]]:
@@ -117,7 +120,7 @@ def entailment_index(model: Any) -> int:
 class Kenning:
     """A loaded System One model. Thread-safe; one request runs at a time."""
 
-    def __init__(self, path: str | os.PathLike[str] = DEFAULT_BASE, device: str | None = None,
+    def __init__(self, path: str | os.PathLike[str] = DEFAULT_MODEL, device: str | None = None,
                  max_length: int | None = None, chunk: int = 32) -> None:
         import torch
         from transformers import AutoModelForSequenceClassification, AutoTokenizer
