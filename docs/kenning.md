@@ -119,9 +119,58 @@ metadata) to measure layout sensitivity; `--suite modern` is 20 hand-written sho
 (evaluation only, never trained on). Engines: `kenning` (this model), `jev` (opt-in TypeSafe Jev with
 your own key, `TYPESAFE_API_KEY`), `local` (an LLM's label-token readout), `llm` (an LLM writing JSON).
 
+### General suite (`--suite general`): the headline
+
+The measure for a general-purpose decision model: 30 questions in 7 families, ~50 items each (1,328
+items; 148 of them ask several questions about the same state).
+
+| Family | What the state is | Labels from |
+|---|---|---|
+| text | the 14 `multi` tasks below | held-out public datasets |
+| table | a table (≤ 12 rows) and a statement about it | TabFact test set |
+| conversation | a multi-turn booking dialogue: which service is it about | GEM schema-guided dialogue, kept only when the conversation visibly names its service and no other |
+| agent | available functions, a request and a call; a goal and the steps an agent took | Glaive function calling; generated |
+| quality | a request and an assistant's answer: how helpful, is it correct | HelpSteer2 validation |
+| records | JSON records with numbers, dates and policies: refunds, spending limits, access rules, ticket priority, census income | generated with exact rule-derived labels; adult census |
+| logs | 60–140 log lines: is a service failing, which one | generated with labels computed from the log itself |
+
+Generated cases come from `system_one/general_generators.py`. They are **benchmark only**: no model labels
+them, so the suite has no bias toward Clef or any other teacher, and training data must never reuse
+their templates or seeds. Logs are capped at ~2.5k tokens so the whole log fits Clef's 4k context.
+Without the cap, the truncated part would be the last minutes, where the answer is. Sources and licences
+are in `system_one/general_suite.py`.
+
+```bash
+docker compose exec api systemone bench --suite general --engines kenning,clef -n 50 --concurrency 1
+```
+
+Baseline (October 2026, one RTX 3090 each, items one at a time, 0 errors, both 5/5 identical on repeat):
+
+| | Kenning v0.4 | Clef-flash | Gap |
+|---|---|---|---|
+| **Macro accuracy (30 questions)** | **0.625** | **0.813** | **−18.8** |
+| text (14) | 0.754 | 0.841 | −8.7 |
+| conversation (1) | 0.958 | 1.000 | −4.2 |
+| table (1) | 0.480 | 0.860 | −38.0 |
+| agent (3) | 0.553 | 0.793 | −24.0 |
+| records (7) | 0.535 | 0.857 | −32.2 |
+| logs (2) | 0.290 | 0.740 | −45.0 |
+| quality (2) | 0.377 | 0.447 | −7.0 |
+| Latency p50 / p95 | 34 / 61 ms | 149 / 382 ms | |
+
+What it says:
+- **On structured state, Kenning is near chance** on several tasks: tool call matches the request (0.50 vs
+  1.00), over the daily limit (0.50 vs 0.92), table statement (0.48 vs 0.86). A refund (0.25 vs 0.92) is
+  eligible in only a quarter of cases, so a model that always says yes scores 0.25.
+- **Logs show the context limit.** Kenning reads 512 tokens of state per option, so it never sees the
+  last minutes of a log (failing service 0.08 vs 0.78).
+- **Answer quality is hard for both** (helpfulness 0.33 / 0.35, correctness 0.42 / 0.54).
+- Kenning answers about 4× faster. Clef's lead on records, tables, agent and logs is the case for the
+  redesigned data (v0.5) and a longer-context model (Kenning-XL).
+
 ### Multi-task suite (`--suite multi`)
 
-The headline benchmark for a general decision model: 14 tasks, ~50 class-balanced items each (~680),
+The text family of `general` on its own: 14 tasks, ~50 class-balanced items each (~680),
 from held-out splits of permissively licensed datasets that Kenning is not trained on. Items are fetched
 at run time with a fixed seed and cached (`bench_cache/multi-n50-seed42.json`); nothing is redistributed.
 The report adds the **macro accuracy**: the mean of per-task accuracy (exact level for the score task).

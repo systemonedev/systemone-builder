@@ -379,6 +379,8 @@ def format_reports(suite: Suite, reports: list[dict[str, Any]]) -> str:
     row("identical on repeat", [f"{r['determinism']['identical']}/{r['determinism']['checked']}" for r in reports])
     if any("macro_accuracy" in r for r in reports):
         row("MACRO ACCURACY (tasks)", [_f(r.get("macro_accuracy")) for r in reports])
+        for fam in sorted({f for r in reports for f in (r.get("family_accuracy") or {})}):
+            row(f"  family: {fam}", [_f((r.get("family_accuracy") or {}).get(fam)) for r in reports])
     for qid, q in suite.questions.items():
         m = [r["questions"][qid] for r in reports]
         lines.append(f"[{qid}] ({q.type})")
@@ -430,6 +432,9 @@ async def run_benchmark(suite: Suite, engines: list[SystemOneEngine], *, concurr
         if len(suite.questions) > 3:  # multi-task suites: one headline number
             from systemone_builder.system_one.multitask_suite import macro_average
             report["macro_accuracy"] = macro_average(report)
+            if suite.name == "general":
+                from systemone_builder.system_one.general_suite import family_averages
+                report["family_accuracy"] = family_averages(report)
         out.reports.append(report)
         out.raw[engine.name] = results
     return out
