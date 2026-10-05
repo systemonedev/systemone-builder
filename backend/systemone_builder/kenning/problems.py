@@ -200,10 +200,11 @@ def _check_prompt(p: Problem, state: dict[str, Any]) -> str:
 
 
 async def _chat(client: httpx.AsyncClient, model: str, prompt: str, schema: dict[str, Any], seed: int,
-                temperature: float, max_tokens: int) -> Any:
+                temperature: float, max_tokens: int, extra: dict[str, Any] | None = None) -> Any:
     body = {"model": model, "temperature": temperature, "top_p": 0.95, "seed": seed, "max_tokens": max_tokens,
             "messages": [{"role": "user", "content": prompt}],
-            "response_format": {"type": "json_schema", "json_schema": {"name": "out", "schema": schema}}}
+            "response_format": {"type": "json_schema", "json_schema": {"name": "out", "schema": schema}},
+            **(extra or {})}
     r = await client.post("/chat/completions", json=body)
     r.raise_for_status()
     return json.loads(r.json()["choices"][0]["message"]["content"])
@@ -211,11 +212,13 @@ async def _chat(client: httpx.AsyncClient, model: str, prompt: str, schema: dict
 
 async def write_cases(p: Problem, n: int, seed: int, base_url: str, model: str, api_key: str | None = None,
                       concurrency: int = 16, max_tokens: int = 700, check: bool = True,
-                      stats: dict[str, int] | None = None) -> list[dict[str, Any]]:
+                      stats: dict[str, int] | None = None, extra: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     """Up to n distinct label-conditioned cases ({"state", "labels"}) written by an OpenAI-compatible teacher.
 
     With check, the teacher then answers the questions about each case without seeing the intended
-    labels, and a case is kept only when every answer matches (a blind agreement filter).
+    labels, and a case is kept only when every answer matches (a blind agreement filter). ``extra`` is
+    added to every request body, e.g. ``{"reasoning_effort": "none"}`` to turn off a reasoning model's
+    thinking on servers that support it.
     """
     rng = random.Random(f"problem-{p.name}-{seed}")
     sem = asyncio.Semaphore(concurrency)
@@ -232,12 +235,13 @@ async def write_cases(p: Problem, n: int, seed: int, base_url: str, model: str, 
         async with sem:
             try:
                 state = _to_state(p, await _chat(client, model, _prompt(p, labels, style), schema,
-                                                 seed * 100_003 + i, 0.9, max_tokens))
+                                                 seed * 100_003 + i, 0.9, max_tokens, extra))
                 if not state:
                     return None
                 counts["written"] += 1
                 if check:
-                    seen = await _chat(client, model, _check_prompt(p, state), check_schema, seed * 100_019 + i, 0.0, 200)
+                    seen = await _chat(client, model, _check_prompt(p, state), check_schema, seed * 100_019 + i, 0.0,
+                                       200, extra)
                     if not isinstance(seen, dict) or any(seen.get(k) != v for k, v in labels.items()):
                         counts["disagreed"] += 1
                         return None

@@ -43,7 +43,7 @@ log = logging.getLogger(__name__)
 KINDS = ("data", "label", "train", "bench")
 SUITES = ("general", "multi", "modern2", "modern", "phishing", "layouts", "ood")
 ENGINES = ("kenning", "clef", "jev", "local")
-DATA_SOURCES = ("amazon", "dbpedia", "clinc", "boolq", "nli", "civil")
+DATA_SOURCES = ("amazon", "dbpedia", "clinc", "boolq", "nli", "civil", "helpsteer", "jailbreak", "injection", "ropes")
 SLUG = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 HF_ID = re.compile(r"^[A-Za-z0-9][\w.-]{0,95}/[\w.-]{1,96}$")
 URL = re.compile(r"^https?://[\w.-]+(:\d+)?(/[\w./-]*)?$")
@@ -174,7 +174,7 @@ def validate(kind: str, p: dict[str, Any], home: Path, *, pipeline: bool, has_je
         have = {x["name"] for x in list_imports(home)}
         if not isinstance(imports, list) or any(not isinstance(x, str) or x not in have for x in imports):
             raise JobError("imports must be names of uploaded files")
-        if not sources and not probs and not imports and not _int(p, "phishing_rows", 0, 0, 50_000):
+        if not sources and not probs and not imports and not _int(p, "phishing_rows", 0, 0, 50_000)                 and not _int(p, "structured", 0, 0, 50_000):
             raise JobError("pick at least one source, problem, import or phishing rows")
         teacher_url = p.get("teacher_url") or None
         if teacher_url is not None and (not isinstance(teacher_url, str) or not URL.match(teacher_url)):
@@ -199,6 +199,8 @@ def validate(kind: str, p: dict[str, Any], home: Path, *, pipeline: bool, has_je
                "synthetic_tasks": _int(p, "synthetic_tasks", 0, 0, 10_000),
                "layout_variation": _float(p, "layout_variation", 0.75, 0.0, 1.0),
                "seed": _int(p, "seed", 7, 0, 2**31 - 1),
+               "structured": _int(p, "structured", 0, 0, 50_000),
+               "genre_share": _float(p, "genre_share", 0.3, 0.0, 1.0),
                "problems": {k: _int(probs, k, 500, 20, 20_000) for k in probs},
                "imports": list(dict.fromkeys(imports)),
                "holdout": _float(p, "holdout", 0.1, 0.0, 0.5),
@@ -267,6 +269,10 @@ def commands(kind: str, p: dict[str, Any], home: Path, clef_url: str) -> list[li
             argv += ["--synthetic-email", str(p["synthetic_email"]), "--subtle-share", str(p["subtle_share"])]
         if p["synthetic_tasks"]:
             argv += ["--synthetic-tasks", str(p["synthetic_tasks"])]
+        if p.get("structured"):
+            argv += ["--structured", str(p["structured"])]
+        if "genre_share" in p:
+            argv += ["--genre-share", str(p["genre_share"])]
         for name, rows in p.get("problems", {}).items():
             argv += ["--problem", f"{name}={rows}"]
         for name in p.get("imports", []):

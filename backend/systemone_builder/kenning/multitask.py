@@ -16,6 +16,10 @@ clinc_oos (plus)    CC-BY-3.0     intent routing over 5-15 of 150 intents, "othe
 boolq               CC-BY-SA-3.0  reading-comprehension yes/no questions
 multi_nli           CC-BY-3.0 *   "does the text imply ...?" (noul) and 3-way choice
 civil_comments      CC0-1.0       soft yes/no targets (annotator fractions), 4-level score
+helpsteer2 (train)  CC-BY-4.0     is an assistant's answer helpful (3 levels) and correct
+jailbreak (train)   Apache-2.0    is a prompt a jailbreak attempt
+injection (train)   Apache-2.0    is a text a prompt-injection attempt
+ropes (train)       CC-BY-4.0     can the passage answer the question; is a proposed answer right
 ==================  ============  ==============================================
 
 \\* multi_nli mixes per-genre licences (mostly CC-BY-3.0 / public); see its card.
@@ -36,7 +40,7 @@ from __future__ import annotations
 
 import json
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
@@ -71,6 +75,8 @@ class Source:
 class Ctx:
     rng: random.Random
     names: dict[str, list[str]]  # ClassLabel names per field
+    genre_share: float = 0.3     # share of rows that also get a "what kind of text is this?" question
+    pool: list[dict[str, Any]] = field(default_factory=list)  # recent rows, for mismatched pairs
 
 
 def _clip(text: str) -> str:
@@ -90,7 +96,7 @@ def _genre_question(rng: random.Random, own: str) -> tuple[str, dict[str, Any], 
 
 
 def _row(state: Any, qs: dict[str, Any], targets: dict[str, Any], ctx: Ctx, genre: str) -> dict[str, Any]:
-    if ctx.rng.random() < 0.3:
+    if genre in GENRES and ctx.rng.random() < ctx.genre_share:
         qid, q, t = _genre_question(ctx.rng, genre)
         qs[qid], targets[qid] = q, t
     return {"state": state, "questions": qs, "targets": targets}
@@ -222,6 +228,86 @@ def make_civil(row: dict[str, Any], ctx: Ctx) -> dict[str, Any] | None:
     return _row(state, qs, targets, ctx, "civil")
 
 
+HELPFUL_LEVELS = ["Not helpful: misses or fails the request", "Partly helpful", "Helpful: fully addresses the request"]
+
+
+def make_helpsteer(row: dict[str, Any], ctx: Ctx) -> dict[str, Any] | None:
+    try:
+        helpful, correct = int(row["helpfulness"]), int(row["correctness"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    state = {"user_request": _clip(row["prompt"])[:1200], "assistant_answer": _clip(row["response"])}
+    qs: dict[str, Any] = {}
+    targets: dict[str, Any] = {}
+    if ctx.rng.random() < 0.6:
+        qs["q_helpful"] = {"type": "score", "instructions": ctx.rng.choice(
+            ["How helpful is the assistant's answer?", "Rate how well the answer serves the user's request."]),
+            "criteria": HELPFUL_LEVELS}
+        targets["q_helpful"] = 0 if helpful <= 1 else 1 if helpful == 2 else 2
+    if correct in (0, 1, 4) and (not qs or ctx.rng.random() < 0.5):  # skip the ambiguous middle
+        qs["q_correct"] = {"type": "noul", "instructions": ctx.rng.choice(
+            ["Is the assistant's answer factually correct?", "Is everything in the answer accurate?"])}
+        targets["q_correct"] = int(correct == 4)
+    return _row(state, qs, targets, ctx, "helpsteer") if qs else None
+
+
+def make_jailbreak(row: dict[str, Any], ctx: Ctx) -> dict[str, Any] | None:
+    if row.get("type") not in ("benign", "jailbreak"):
+        return None
+    instr = ctx.rng.choice(["Is this prompt a jailbreak attempt?", "Does this message try to get the assistant to ignore its rules?",
+                            "Is the user trying to bypass the assistant's safety guidelines?"])
+    return _row({"prompt": _clip(row["prompt"])}, {"q_jb": {"type": "noul", "instructions": instr}},
+                {"q_jb": int(row["type"] == "jailbreak")}, ctx, "jailbreak")
+
+
+def make_injection(row: dict[str, Any], ctx: Ctx) -> dict[str, Any] | None:
+    try:
+        label = int(row["label"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    instr = ctx.rng.choice(["Is this text a prompt-injection attempt?", "Does this input try to override the system's instructions?"])
+    return _row({"input": _clip(row["text"])}, {"q_inj": {"type": "noul", "instructions": instr}}, {"q_inj": label},
+                ctx, "injection")
+
+
+def _ropes_answers(row: dict[str, Any]) -> list[str]:
+    answers = row.get("answers") or {}
+    if isinstance(answers, str):  # some datasets-server pages serialise the dict
+        try:
+            answers = json.loads(answers.replace("'", '"'))
+        except ValueError:
+            return []
+    return [t for t in (answers.get("text") or []) if isinstance(t, str) and t.strip()]
+
+
+def make_ropes(row: dict[str, Any], ctx: Ctx) -> dict[str, Any] | None:
+    texts = _ropes_answers(row)
+    if not texts:
+        return None
+    ctx.pool.append(row)
+    if len(ctx.pool) > 50:
+        ctx.pool.pop(0)
+    others = [r for r in ctx.pool if r is not row and r.get("background") != row.get("background")]
+    if not others:
+        return None
+    other = ctx.rng.choice(others)
+    q = row["question"].strip()
+    if ctx.rng.random() < 0.5:  # answerable: its own passage, or another one
+        own = ctx.rng.random() < 0.5
+        src = row if own else other
+        state = {"background": _clip(src["background"])[:900], "situation": _clip(src["situation"])[:600]}
+        qs = {"q_ans": {"type": "noul", "instructions": f"Can this question be answered from the text: \"{q}\"?"}}
+        return _row(state, qs, {"q_ans": int(own)}, ctx, "ropes")
+    other_answers = _ropes_answers(other)
+    right = ctx.rng.random() < 0.5 or not other_answers
+    cand = texts[0] if right else other_answers[0]
+    if not right and cand in texts:
+        return None
+    state = {"background": _clip(row["background"])[:900], "situation": _clip(row["situation"])[:600]}
+    qs = {"q_ans": {"type": "noul", "instructions": f"{q} Is the answer \"{cand}\"?"}}
+    return _row(state, qs, {"q_ans": int(right)}, ctx, "ropes")
+
+
 def accept_nli(row: dict[str, Any], ctx: Ctx) -> bool:
     # MultiNLI is under the OANC's permissive licence except its fiction genre, which
     # includes a CC-BY-SA-3.0 work (Williams et al., 2018): leave fiction out.
@@ -241,6 +327,11 @@ SOURCES = {
     "nli": Source("nli", "nyu-mll/multi_nli", "default", "train", "OANC (permissive); fiction genre excluded",
                   make_nli, accept_nli),
     "civil": Source("civil", "google/civil_comments", "default", "train", "CC0-1.0", make_civil, accept_civil),
+    # train splits of datasets whose test or validation splits are in the general benchmark
+    "helpsteer": Source("helpsteer", "nvidia/HelpSteer2", "default", "train", "CC-BY-4.0", make_helpsteer),
+    "jailbreak": Source("jailbreak", "jackhhao/jailbreak-classification", "default", "train", "Apache-2.0", make_jailbreak),
+    "injection": Source("injection", "deepset/prompt-injections", "default", "train", "Apache-2.0", make_injection),
+    "ropes": Source("ropes", "allenai/ropes", "plain_text", "train", "CC-BY-4.0", make_ropes),
 }
 
 
@@ -251,8 +342,9 @@ async def class_names(client: httpx.AsyncClient, src: Source) -> dict[str, list[
     return {k: v["names"] for k, v in feats.items() if isinstance(v, dict) and v.get("names")}
 
 
-async def sample_source(client: httpx.AsyncClient, src: Source, n: int, rng: random.Random) -> list[dict[str, Any]]:
-    ctx = Ctx(rng, await class_names(client, src))
+async def sample_source(client: httpx.AsyncClient, src: Source, n: int, rng: random.Random,
+                        genre_share: float = 0.3) -> list[dict[str, Any]]:
+    ctx = Ctx(rng, await class_names(client, src), genre_share)
     first = await hf_get(client, "/rows", {"dataset": src.dataset, "config": src.config, "split": src.split,
                                            "offset": 0, "length": 1})
     total = int(first.get("num_rows_total") or 0)
@@ -269,7 +361,9 @@ async def sample_source(client: httpx.AsyncClient, src: Source, n: int, rng: ran
             continue  # skip a page the server keeps refusing
         rows = [x["row"] for x in data.get("rows", [])]
         rng.shuffle(rows)
-        for row in rows[: 25 if n <= 2000 else 100]:  # spread small samples over many pages
+        # spread small samples over many pages, but take enough per page from a small dataset to reach n
+        take = max(25 if n <= 2000 else 100, -(-n // max(len(pages), 1)))
+        for row in rows[:take]:
             if len(out) >= n:
                 break
             if src.accept(row, ctx):
@@ -284,14 +378,16 @@ async def multitask_rows(per_source: int, seed: int, phishing_file: Path | None 
                          phishing_rows: int = 1500, sources: list[str] | None = None,
                          layout_variation: float = 0.75,
                          extra: dict[str, tuple[list[dict[str, Any]], dict[str, Any]]] | None = None,
-                         source_rows: dict[str, int] | None = None) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+                         source_rows: dict[str, int] | None = None,
+                         genre_share: float = 0.3) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     rng = random.Random(seed)
     rows: list[dict[str, Any]] = []
     manifest: dict[str, Any] = {"seed": seed, "sources": {}}
     async with httpx.AsyncClient(timeout=60) as client:
         for key in list(SOURCES) if sources is None else sources:
             src = SOURCES[key]
-            got = await sample_source(client, src, (source_rows or {}).get(key, per_source), random.Random(rng.random()))
+            got = await sample_source(client, src, (source_rows or {}).get(key, per_source), random.Random(rng.random()),
+                                      genre_share)
             rows.extend(got)
             manifest["sources"][key] = {"dataset": src.dataset, "config": src.config, "split": src.split,
                                         "license": src.license, "rows": len(got)}

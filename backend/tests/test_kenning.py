@@ -389,6 +389,11 @@ def test_distillation_blends_teacher_and_labels_and_reports_agreement(monkeypatc
             qq = Question.model_validate(qd)
             assert sum(target_vector(qq, hypotheses(qq)[1], row["targets"][qid])) == pytest.approx(1.0)
 
+    # rule-generated rows keep their exact labels; the teacher's agreement is still reported
+    exact = [{**rows[0], "source": "structured:loan"}]
+    out, report = distill.label_rows(exact, "http://teacher", alpha=0.5)
+    assert out[0]["targets"] == {"q": 1} and report["structured:loan"]["agree"] == 1
+
 
 def test_micro_batches_bound_pairs_and_keep_groups_whole():
     groups = [{"hyps": ["h"] * k} for k in (5, 30, 20, 60, 2, 2)]

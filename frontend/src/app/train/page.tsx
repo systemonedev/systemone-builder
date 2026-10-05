@@ -18,6 +18,10 @@ const SOURCES: { id: string; dataset: string; license: string; clean: boolean }[
   { id: "civil", dataset: "google/civil_comments", license: "CC0-1.0", clean: true },
   { id: "boolq", dataset: "google/boolq", license: "CC-BY-SA-3.0", clean: false },
   { id: "dbpedia", dataset: "fancyzhx/dbpedia_14", license: "CC-BY-SA-3.0", clean: false },
+  { id: "helpsteer", dataset: "nvidia/HelpSteer2 (train): answer quality", license: "CC-BY-4.0", clean: true },
+  { id: "jailbreak", dataset: "jackhhao/jailbreak-classification (train)", license: "Apache-2.0", clean: true },
+  { id: "injection", dataset: "deepset/prompt-injections (train)", license: "Apache-2.0", clean: true },
+  { id: "ropes", dataset: "allenai/ropes (train): passage reasoning", license: "CC-BY-4.0", clean: true },
 ];
 const CLEAN_ROWS = "nli=20000, clinc=3000, amazon=2000, civil=2000";
 
@@ -216,6 +220,8 @@ function DataCard({ datasets, pipeline, reload }: { datasets: Dataset[]; pipelin
   const [phishing, setPhishing] = useState(0);
   const [synthEmail, setSynthEmail] = useState(0);
   const [synthTasks, setSynthTasks] = useState(0);
+  const [structured, setStructured] = useState(0);
+  const [genreShare, setGenreShare] = useState(0.3);
   const toggle = (id: string) => setSources((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
   const nonClean = sources.filter((id) => !SOURCES.find((s) => s.id === id)?.clean);
   const withProblem = preset !== "general";
@@ -224,7 +230,7 @@ function DataCard({ datasets, pipeline, reload }: { datasets: Dataset[]; pipelin
   const chosenImports = withProblem ? picks : [];
   const needsTeacher = Object.keys(chosenProblems).length > 0;
   const teacherOk = !needsTeacher || (teacher === "triage" ? pipeline : !!teacherUrl && !!teacherModel);
-  const hasData = (withGeneral && sources.length > 0) || needsTeacher || chosenImports.length > 0 || phishing > 0;
+  const hasData = (withGeneral && (sources.length > 0 || structured > 0)) || needsTeacher || chosenImports.length > 0 || phishing > 0;
 
   return (
     <Card
@@ -381,6 +387,12 @@ function DataCard({ datasets, pipeline, reload }: { datasets: Dataset[]; pipelin
                 <Field label={`Synthetic tasks per task${pipeline ? "" : " (needs the pipeline's triage LLM)"}`}>
                   <input type="number" className={inputCls} value={synthTasks} min={0} disabled={!pipeline} onChange={(e) => setSynthTasks(Number(e.target.value))} />
                 </Field>
+                <Field label="Structured decisions per generator (records, tables, agent steps, logs; exact labels)">
+                  <input type="number" className={inputCls} value={structured} min={0} onChange={(e) => setStructured(Number(e.target.value))} />
+                </Field>
+                <Field label={`"What kind of text is this?" questions: ${Math.round(genreShare * 100)}% of public rows`}>
+                  <input type="range" min={0} max={0.5} step={0.05} value={genreShare} onChange={(e) => setGenreShare(Number(e.target.value))} className="w-full" />
+                </Field>
               </div>
             </section>
           )}
@@ -409,6 +421,8 @@ function DataCard({ datasets, pipeline, reload }: { datasets: Dataset[]; pipelin
                 phishing_rows: phishing,
                 synthetic_email: synthEmail,
                 synthetic_tasks: withGeneral ? synthTasks : 0,
+                structured: withGeneral ? structured : 0,
+                genre_share: genreShare,
                 problems: chosenProblems,
                 imports: chosenImports,
                 holdout,
