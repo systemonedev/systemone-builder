@@ -21,7 +21,6 @@ from typing import Any
 
 import httpx
 
-from systemone_builder.orchestrator.docker_ctl import ContainerController
 from systemone_builder.orchestrator.gpu import placement_warnings
 
 # Most specific first. Each maps a vLLM / HF log line to a short progress label.

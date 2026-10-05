@@ -154,8 +154,64 @@ async def synthetic_task_rows(s, datasets, per_task: int, seed: int):  # noqa: A
     return to_training_rows(texts, seed + 13), meta
 
 
+async def problem_rows(s, datasets, ref: str, n: int, seed: int, holdout: float, teacher_url: str | None,  # noqa: ANN001
+                       teacher_model: str | None, check: bool):  # noqa: ANN201
+    """Teacher-written rows for a problem spec, plus its held-out benchmark items (cases cached in datasets/)."""
+    import re
+
+    from systemone_builder.adapters.byom import resolve
+    from systemone_builder.kenning import problems
+
+    prob = problems.load_problem(ref, datasets.parent / "problems")
+    if teacher_url:
+        url, model, key = teacher_url, teacher_model, os.environ.get("S1_TEACHER_API_KEY")
+        if not model:
+            raise SystemExit("--teacher-model is required with --teacher-url")
+    else:
+        t = resolve(s)["triage"]
+        url, model, key = t.url, teacher_model or t.model, t.api_key()
+    tag = re.sub(r"[^a-z0-9.]+", "-", model.lower()).strip("-")[:40]
+    cache = datasets / f"problem-{prob.name}-n{n}-seed{seed}-{tag}{'' if check else '-unchecked'}.jsonl"
+    if cache.exists():
+        cases = [json.loads(x) for x in cache.read_text(encoding="utf-8").splitlines() if x.strip()]
+        print(f"[kenning-data] reusing {len(cases)} {prob.name} cases from {cache}")
+    else:
+        stats: dict[str, int] = {}
+        print(f"[kenning-data] asking {model} for {n} {prob.name} cases"
+              f"{' (each checked blind by the teacher)' if check else ''} ...", flush=True)
+        cases = await problems.write_cases(prob, n, seed, url, model, key, concurrency=16, check=check, stats=stats)
+        print(f"[kenning-data] {prob.name}: {stats.get('asked', 0)} asked, {stats.get('written', 0)} written, "
+              f"{stats.get('disagreed', 0)} failed the blind check, {len(cases)} kept", flush=True)
+        if len(cases) < n:
+            print(f"[kenning-data] warning: only {len(cases)} of {n} {prob.name} cases; a stronger teacher "
+                  "(--teacher-url/--teacher-model) or clearer label descriptions keep more", flush=True)
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        cache.write_text("".join(json.dumps(c, ensure_ascii=False) + "\n" for c in cases), encoding="utf-8")
+    train, held = problems.split(cases, holdout, seed, prob.name)
+    meta = {"dataset": f"problem {prob.name}: {prob.title}, cases written by {model}", "file": str(cache),
+            "license": f"generated (teacher: {model}; check its licence)", "blind_check": check}
+    hold = (problems.holdout_items(prob, held), problems.canonical_questions(prob)) if held else None
+    return problems.training_rows(prob, train, seed), meta, hold
+
+
+def import_rows(path: str, licence: str, holdout: float, seed: int):  # noqa: ANN201
+    """Your own labelled rows (validated), plus held-out benchmark items."""
+    from pathlib import Path
+
+    from systemone_builder.kenning import importer, problems
+
+    src = Path(path)
+    qpath = src.with_name(src.stem + ".questions.json")
+    rows, questions = importer.load_rows(src, qpath if qpath.exists() else None)
+    train, held = problems.split(rows, holdout, seed, src.stem)
+    meta = {"dataset": f"imported from {src.name}", "file": str(src), "license": licence}
+    items = importer.holdout_items(held, questions, src.stem) if held else []
+    print(f"[kenning-data] import {src.name}: {len(rows)} valid rows, {len(items)} held out", flush=True)
+    return train, meta, ((items, questions) if items else None)
+
+
 def cmd_data(a: argparse.Namespace) -> int:
-    """Write System One training rows (JSONL): the phishing task or the multi-task mix."""
+    """Write System One training rows (JSONL): the phishing task, or a mix of general and problem data."""
     from pathlib import Path
 
     from systemone_builder.config import get_settings
@@ -169,25 +225,53 @@ def cmd_data(a: argparse.Namespace) -> int:
     out = Path(a.out or datasets / f"{a.task}-train.jsonl")
 
     async def go() -> int:
-        await phishing_suite(a.bench_n, a.bench_seed, cache)  # make sure the benchmark set exists to exclude it
+        if a.task == "phishing" or a.phishing_rows:
+            await phishing_suite(a.bench_n, a.bench_seed, cache)  # make sure the benchmark set exists to exclude it
+        holdouts: dict[str, tuple[list[dict], dict]] = {}
         if a.task == "phishing":
             rows = await phishing_training_rows(a.n, a.seed, cache)
             manifest = None
         else:
             phishing_file = out.parent / "phishing-train.jsonl"
-            if not phishing_file.exists():
+            if a.phishing_rows and not phishing_file.exists():
                 phishing_file.parent.mkdir(parents=True, exist_ok=True)
                 prow = await phishing_training_rows(4000, 7, cache)
                 phishing_file.write_text("".join(json.dumps(r) + "\n" for r in prow))
             extra = {}
+            for spec in a.problem or []:
+                ref, _, n = spec.partition("=")
+                prow, meta, hold = await problem_rows(s, datasets, ref, int(n or 500), a.seed, a.holdout,
+                                                      a.teacher_url, a.teacher_model, not a.no_check)
+                key = f"problem:{Path(ref).stem}"
+                extra[key] = (prow, meta)
+                if hold:
+                    holdouts[key] = hold
+            for i, path in enumerate(a.import_ or []):
+                licence = (a.import_licence or [])[i] if i < len(a.import_licence or []) else "provided by the user"
+                irow, meta, hold = import_rows(path, licence, a.holdout, a.seed)
+                key = f"import:{Path(path).stem}"
+                extra[key] = (irow, meta)
+                if hold:
+                    holdouts[key] = hold
             if a.synthetic_email:
                 extra["synth_email"] = await synthetic_email_rows(s, out.parent, a.synthetic_email, a.seed, a.subtle_share)
             if a.synthetic_tasks:
                 extra["synth_tasks"] = await synthetic_task_rows(s, out.parent, a.synthetic_tasks, a.seed)
             source_rows = {k: int(v) for k, v in (p.split("=") for p in a.source_rows.split(","))} if a.source_rows else None
+            sources = None if not a.sources else [] if a.sources == "none" else a.sources.split(",")
             rows, manifest = await multitask_rows(a.per_source, a.seed, phishing_file if a.phishing_rows else None,
-                                                  a.phishing_rows, a.sources.split(",") if a.sources else None,
-                                                  a.layout_variation, extra, source_rows)
+                                                  a.phishing_rows, sources, a.layout_variation, extra, source_rows)
+            if holdouts:
+                hdir = out.with_suffix(".holdout")
+                hdir.mkdir(parents=True, exist_ok=True)
+                manifest["holdouts"] = {}
+                for key, (items, questions) in holdouts.items():
+                    stem = key.replace(":", "-")
+                    (hdir / f"{stem}.jsonl").write_text("".join(json.dumps(x, ensure_ascii=False) + "\n" for x in items),
+                                                        encoding="utf-8")
+                    (hdir / f"{stem}.questions.json").write_text(json.dumps(questions, indent=1), encoding="utf-8")
+                    manifest["holdouts"][key] = {"items": len(items), "file": f"{hdir.name}/{stem}.jsonl"}
+                    print(f"[kenning-data] held out {len(items)} {key} items for benchmarking: {hdir / (stem + '.jsonl')}")
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text("".join(json.dumps(r) + "\n" for r in rows))
         if manifest:
@@ -197,6 +281,59 @@ def cmd_data(a: argparse.Namespace) -> int:
         return 0
 
     return asyncio.run(go())
+
+
+def cmd_problems(a: argparse.Namespace) -> int:  # noqa: ARG001
+    """List built-in problem specs."""
+    from systemone_builder.kenning.problems import builtin_problems
+
+    for p in builtin_problems().values():
+        sm = p.summary()
+        print(f"{p.name:<18} {p.title}")
+        print(f"{'':<18} state: {', '.join(sm['state'])}")
+        for qid, labels in sm["questions"].items():
+            print(f"{'':<18} - {qid}: {' / '.join(labels)}")
+    return 0
+
+
+def cmd_calibrate(a: argparse.Namespace) -> int:
+    """Refit a Kenning model's temperatures on your labelled data (accuracy unchanged)."""
+    from pathlib import Path
+
+    from systemone_builder.config import get_settings
+    from systemone_builder.kenning import registry
+    from systemone_builder.kenning.calibrate import calibrate, save
+    from systemone_builder.kenning.model import local_dir
+
+    s = get_settings()
+    if "/" in a.model:  # a Hugging Face repo: calibrate a local copy
+        if not a.save_as:
+            print("a Hugging Face model can't be changed in place: add --save-as <name> for a calibrated local copy")
+            return 2
+        src = Path(local_dir(a.model))
+    else:
+        src = registry.model_dir(s.kenning_dir(), a.model)
+    report = calibrate(src, Path(a.data), a.url or s.kenning_url)
+    print(f"{report['model']} on {report['data']}: {report['questions']} answers")
+    for kind in sorted(report["after"]):
+        b, f = report["before"][kind], report["after"][kind]
+        t0, t1 = report["temperature_before"].get(kind), report["temperature_after"].get(kind)
+        temps = f"T {t0} -> {t1}  " if kind != "all" else " " * (len(f"T {t0} -> {t1}  ") if t0 else 0)
+        print(f"  {kind:<7} n={b['n']:<5} {temps}accuracy {b['accuracy']:.3f}  ECE {b['ece']:.3f} -> {f['ece']:.3f}  "
+              f"NLL {b['nll']:.3f} -> {f['nll']:.3f}")
+    if not a.write:
+        print("dry run: add --write to save the new temperatures")
+        return 0
+    dst = src
+    if a.save_as:
+        dst = s.kenning_dir() / "models" / registry._valid(a.save_as)
+        if dst.exists():
+            print(f"a model named {a.save_as!r} already exists")
+            return 2
+        shutil.copytree(src, dst, ignore=shutil.ignore_patterns(".cache", "*.lock"))
+    save(dst, report, a.save_as)
+    print(f"saved to {dst}: activate it again (Models page) to serve the new temperatures")
+    return 0
 
 
 def cmd_label(a: argparse.Namespace) -> int:
@@ -356,6 +493,8 @@ def main(argv: list[str] | None = None) -> int:
     v.add_argument("model")
     v.set_defaults(fn=cmd_validate_model)
     sub.add_parser("templates", help="list starter templates").set_defaults(fn=cmd_templates)
+    sub.add_parser("problems", help="list the built-in problem specs for `systemone data --problem`").set_defaults(
+        fn=cmd_problems)
     sub.add_parser("doctor", help="check hardware, Docker, Redis and model endpoints").set_defaults(fn=cmd_doctor)
     b = sub.add_parser("bench", aliases=["s1-bench"], help="benchmark System One engines (Kenning, local LLM, opt-in Jev) on a labelled suite")
     b.add_argument("--suite", default="phishing",
@@ -378,7 +517,23 @@ def main(argv: list[str] | None = None) -> int:
     d.add_argument("-n", type=int, default=4000, help="phishing rows (--task phishing)")
     d.add_argument("--per-source", type=int, default=1200, help="rows per public dataset (--task multitask)")
     d.add_argument("--phishing-rows", type=int, default=1500, help="phishing rows mixed in (--task multitask)")
-    d.add_argument("--sources", help="comma-separated subset of: amazon, dbpedia, clinc, boolq, nli, civil")
+    d.add_argument("--sources", help="comma-separated subset of: amazon, dbpedia, clinc, boolq, nli, civil; "
+                                     "'none' for problem or imported data only")
+    d.add_argument("--problem", action="append", metavar="NAME[=ROWS]",
+                   help="add teacher-written cases for a problem spec: a built-in name (see `systemone problems`), a "
+                        "spec saved on the Train page, or a path to a spec JSON; ROWS defaults to 500 (repeatable)")
+    d.add_argument("--import", dest="import_", action="append", metavar="FILE.jsonl",
+                   help="add your own labelled rows: training rows, or {state, labels} lines with FILE.questions.json "
+                        "next to them (repeatable)")
+    d.add_argument("--import-licence", action="append", metavar="TEXT",
+                   help="licence of each --import, in the same order (recorded in the manifest)")
+    d.add_argument("--holdout", type=float, default=0.1,
+                   help="share of each problem and import held out as a benchmark suite (0 = none)")
+    d.add_argument("--teacher-url", help="OpenAI-compatible base URL of the teacher that writes problem cases "
+                                         "(default: the triage model); key in S1_TEACHER_API_KEY if it needs one")
+    d.add_argument("--teacher-model", help="teacher model name (required with --teacher-url)")
+    d.add_argument("--no-check", action="store_true",
+                   help="keep problem cases without the teacher's blind check (faster, noisier labels)")
     d.add_argument("--synthetic-email", type=int, default=0, metavar="N",
                    help="add N phishing + N legitimate modern emails written by the triage model from labelled "
                         "scenarios (--task multitask; cached in datasets/)")
@@ -391,6 +546,15 @@ def main(argv: list[str] | None = None) -> int:
     lb.add_argument("--batch", type=int, default=16)
     lb.add_argument("--limit", type=int, help="only the first N rows (quick checks)")
     lb.set_defaults(fn=cmd_label)
+    cb = sub.add_parser("calibrate", help="refit a Kenning model's temperatures on your own labelled data "
+                                          "(the model must be the one being served)")
+    cb.add_argument("model", help="registered model name, or a Hugging Face id with --save-as")
+    cb.add_argument("--data", required=True, help="labelled JSONL: training rows, or {state, labels} lines with "
+                                                 "<file>.questions.json next to it")
+    cb.add_argument("--url", help="Kenning server (default: S1_KENNING_URL)")
+    cb.add_argument("--write", action="store_true", help="save the new temperatures (default: report only)")
+    cb.add_argument("--save-as", metavar="NAME", help="write a calibrated copy under this name instead of in place")
+    cb.set_defaults(fn=cmd_calibrate)
     pb = sub.add_parser("publish", help="upload a trained Kenning model to the Hugging Face Hub (Apache-2.0 models only)")
     pb.add_argument("model", help="registered model name, e.g. kenning-large-v0.4")
     pb.add_argument("--org", default="systemonedev", help="Hugging Face user or org (repo: <org>/<model>)")

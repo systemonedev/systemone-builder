@@ -46,6 +46,8 @@ ENGINES = ("kenning", "clef", "jev", "local")
 DATA_SOURCES = ("amazon", "dbpedia", "clinc", "boolq", "nli", "civil")
 SLUG = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 HF_ID = re.compile(r"^[A-Za-z0-9][\w.-]{0,95}/[\w.-]{1,96}$")
+URL = re.compile(r"^https?://[\w.-]+(:\d+)?(/[\w./-]*)?$")
+HOLDOUT = re.compile(r"^holdout:([a-z0-9][a-z0-9._-]{0,63})/([a-z0-9][\w.:-]{0,140})$")
 STEP = re.compile(r"step (\d+)/(\d+)")
 ROWS = re.compile(r"(\d+)/(\d+) rows")
 
@@ -82,6 +84,56 @@ def dataset_path(home: Path, name: str) -> Path:
     return home / "datasets" / f"{name}.jsonl"
 
 
+def problems_dir(home: Path) -> Path:
+    return home / "problems"
+
+
+def imports_dir(home: Path) -> Path:
+    return home / "imports"
+
+
+def list_problems(home: Path) -> list[dict[str, Any]]:
+    """Built-in problem specs and the ones saved from the Train page."""
+    from systemone_builder.kenning.problems import builtin_problems, parse_problem
+
+    out = [{**p.summary(), "builtin": True} for p in builtin_problems().values()]
+    for f in sorted(problems_dir(home).glob("*.json")) if problems_dir(home).is_dir() else []:
+        try:
+            out.append({**parse_problem(json.loads(f.read_text(encoding="utf-8"))).summary(), "builtin": False})
+        except (ValueError, OSError):
+            continue
+    return out
+
+
+def list_imports(home: Path) -> list[dict[str, Any]]:
+    root = imports_dir(home)
+    out = []
+    for f in sorted(root.glob("*.jsonl")) if root.is_dir() else []:
+        if not SLUG.match(f.stem):  # uploads in progress
+            continue
+        meta = f.with_suffix(".meta.json")
+        m = json.loads(meta.read_text(encoding="utf-8")) if meta.exists() else {}
+        out.append({"name": f.stem, "rows": m.get("rows"), "questions": m.get("questions", []),
+                    "license": m.get("license"), "size_bytes": f.stat().st_size})
+    return out
+
+
+def holdout_paths(home: Path, suite: str) -> tuple[Path, Path]:
+    """(items, questions) for a 'holdout:<dataset>/<key>' suite, checked against the dataset manifest."""
+    m = HOLDOUT.match(suite)
+    if not m:
+        raise JobError(f"unknown suite {suite!r} (suites: {', '.join(SUITES)}, or holdout:<dataset>/<key>)")
+    ds, key = m.groups()
+    manifest = dataset_path(home, ds).with_suffix(".manifest.json")
+    info = (json.loads(manifest.read_text()) if manifest.exists() else {}).get("holdouts", {}).get(key)
+    if not info:
+        raise JobError(f"dataset {ds!r} has no hold-out {key!r}")
+    items = (home / "datasets" / info["file"]).resolve()
+    if (home / "datasets").resolve() not in items.parents or not items.exists():
+        raise JobError(f"hold-out file for {suite!r} is missing")
+    return items, items.with_name(items.stem + ".questions.json")
+
+
 def list_datasets(home: Path) -> list[dict[str, Any]]:
     root = home / "datasets"
     out = []
@@ -97,7 +149,8 @@ def list_datasets(home: Path) -> list[dict[str, Any]]:
         out.append({"name": f.stem, "rows": rows, "size_bytes": f.stat().st_size, "modified": f.stat().st_mtime,
                     "sources": {k: {"rows": v.get("rows"), "license": v.get("license"), "dataset": v.get("dataset")}
                                 for k, v in (manifest.get("sources") or {}).items()},
-                    "teacher": manifest.get("teacher")})
+                    "teacher": manifest.get("teacher"),
+                    "holdouts": {k: v.get("items") for k, v in (manifest.get("holdouts") or {}).items()}})
     return sorted(out, key=lambda d: d["modified"], reverse=True)
 
 
@@ -110,9 +163,30 @@ def validate(kind: str, p: dict[str, Any], home: Path, *, pipeline: bool, has_je
         name = _slug(p, "name")
         if dataset_path(home, name).exists():
             raise JobError(f"dataset {name!r} already exists; pick another name")
-        sources = p.get("sources") or list(DATA_SOURCES)
-        if not isinstance(sources, list) or not sources or any(s not in DATA_SOURCES for s in sources):
-            raise JobError(f"sources must be a non-empty subset of {', '.join(DATA_SOURCES)}")
+        sources = p.get("sources", list(DATA_SOURCES))
+        if not isinstance(sources, list) or any(s not in DATA_SOURCES for s in sources):
+            raise JobError(f"sources must be a subset of {', '.join(DATA_SOURCES)}")
+        known = {x["name"] for x in list_problems(home)}
+        probs = p.get("problems") or {}
+        if not isinstance(probs, dict) or any(k not in known for k in probs):
+            raise JobError(f"problems must map problem names ({', '.join(sorted(known))}) to row counts")
+        imports = p.get("imports") or []
+        have = {x["name"] for x in list_imports(home)}
+        if not isinstance(imports, list) or any(not isinstance(x, str) or x not in have for x in imports):
+            raise JobError("imports must be names of uploaded files")
+        if not sources and not probs and not imports and not _int(p, "phishing_rows", 0, 0, 50_000):
+            raise JobError("pick at least one source, problem, import or phishing rows")
+        teacher_url = p.get("teacher_url") or None
+        if teacher_url is not None and (not isinstance(teacher_url, str) or not URL.match(teacher_url)):
+            raise JobError("teacher_url must be an http(s) URL, e.g. http://host:11434/v1")
+        teacher_model = p.get("teacher_model") or None
+        if teacher_model is not None and (not isinstance(teacher_model, str) or not re.match(r"^[\w./:-]{1,128}$", teacher_model)):
+            raise JobError("teacher_model must be a model name")
+        if teacher_url and not teacher_model:
+            raise JobError("teacher_model is required with teacher_url")
+        if probs and not teacher_url and not pipeline:
+            raise JobError("problem cases are written by a teacher LLM: start the pipeline profile (the triage "
+                           "model), or give teacher_url and teacher_model (any OpenAI-compatible server)")
         rows = p.get("source_rows") or {}
         if not isinstance(rows, dict) or any(k not in sources for k in rows):
             raise JobError("source_rows keys must be among the chosen sources")
@@ -124,7 +198,12 @@ def validate(kind: str, p: dict[str, Any], home: Path, *, pipeline: bool, has_je
                "subtle_share": _float(p, "subtle_share", 0.4, 0.0, 1.0),
                "synthetic_tasks": _int(p, "synthetic_tasks", 0, 0, 10_000),
                "layout_variation": _float(p, "layout_variation", 0.75, 0.0, 1.0),
-               "seed": _int(p, "seed", 7, 0, 2**31 - 1)}
+               "seed": _int(p, "seed", 7, 0, 2**31 - 1),
+               "problems": {k: _int(probs, k, 500, 20, 20_000) for k in probs},
+               "imports": list(dict.fromkeys(imports)),
+               "holdout": _float(p, "holdout", 0.1, 0.0, 0.5),
+               "check": p.get("check", True) is not False,
+               "teacher_url": teacher_url, "teacher_model": teacher_model}
         if (out["synthetic_email"] or out["synthetic_tasks"]) and not pipeline:
             raise JobError("synthetic rows are written by the triage LLM: start the pipeline profile "
                            "(S1_PIPELINE=1, docker compose --profile pipeline up -d) or set them to 0")
@@ -155,8 +234,11 @@ def validate(kind: str, p: dict[str, Any], home: Path, *, pipeline: bool, has_je
     # bench
     suites = p.get("suites") or ["general"]
     engines = p.get("engines") or ["kenning"]
-    if not isinstance(suites, list) or any(s not in SUITES for s in suites):
-        raise JobError(f"suites must be a subset of {', '.join(SUITES)}")
+    if not isinstance(suites, list) or any(not isinstance(s, str) for s in suites):
+        raise JobError(f"suites must be a list of {', '.join(SUITES)} or holdout:<dataset>/<key>")
+    for s in suites:
+        if s not in SUITES:
+            holdout_paths(home, s)  # raises unless it's a hold-out of an existing dataset
     if not isinstance(engines, list) or not engines or any(e not in ENGINES for e in engines):
         raise JobError(f"engines must be a subset of {', '.join(ENGINES)}")
     if "jev" in engines:
@@ -176,7 +258,7 @@ def commands(kind: str, p: dict[str, Any], home: Path, clef_url: str) -> list[li
     cli = [sys.executable, "-m", "systemone_builder.cli"]
     if kind == "data":
         argv = cli + ["data", "--task", "multitask", "--out", str(dataset_path(home, p["name"])),
-                      "--sources", ",".join(p["sources"]), "--per-source", str(p["per_source"]),
+                      "--sources", ",".join(p["sources"]) or "none", "--per-source", str(p["per_source"]),
                       "--phishing-rows", str(p["phishing_rows"]), "--layout-variation", str(p["layout_variation"]),
                       "--seed", str(p["seed"])]
         if p["source_rows"]:
@@ -185,6 +267,19 @@ def commands(kind: str, p: dict[str, Any], home: Path, clef_url: str) -> list[li
             argv += ["--synthetic-email", str(p["synthetic_email"]), "--subtle-share", str(p["subtle_share"])]
         if p["synthetic_tasks"]:
             argv += ["--synthetic-tasks", str(p["synthetic_tasks"])]
+        for name, rows in p.get("problems", {}).items():
+            argv += ["--problem", f"{name}={rows}"]
+        for name in p.get("imports", []):
+            meta = imports_dir(home) / f"{name}.meta.json"
+            licence = json.loads(meta.read_text(encoding="utf-8")).get("license") if meta.exists() else None
+            argv += ["--import", str(imports_dir(home) / f"{name}.jsonl"),
+                     "--import-licence", licence or "provided by the user"]
+        if p.get("problems") or p.get("imports"):
+            argv += ["--holdout", str(p["holdout"])]
+        if p.get("teacher_url"):
+            argv += ["--teacher-url", p["teacher_url"], "--teacher-model", p["teacher_model"]]
+        if p.get("problems") and not p.get("check", True):
+            argv.append("--no-check")
         return [argv]
     if kind == "label":
         argv = cli + ["label", str(dataset_path(home, p["dataset"])), "--out", str(dataset_path(home, p["name"])),
@@ -194,8 +289,16 @@ def commands(kind: str, p: dict[str, Any], home: Path, clef_url: str) -> list[li
             argv += ["--limit", str(p["limit"])]
         return [argv]
     if kind == "bench":
-        return [cli + ["bench", "--suite", s, "--engines", ",".join(p["engines"]), "-n", str(60 if s == "ood" else 50 if s in ("multi", "general") else p["n"]),
-                       "--concurrency", "1", "--repeat-check", str(p["repeat_check"])] for s in p["suites"]]
+        out = []
+        for suite in p["suites"]:
+            common = ["--engines", ",".join(p["engines"]), "--concurrency", "1", "--repeat-check", str(p["repeat_check"])]
+            if suite in SUITES:
+                n = 60 if suite == "ood" else 50 if suite in ("multi", "general") else p["n"]
+                out.append(cli + ["bench", "--suite", suite, "-n", str(n)] + common)
+            else:
+                items, questions = holdout_paths(home, suite)
+                out.append(cli + ["bench", "--suite", str(items), "--questions", str(questions)] + common)
+        return out
     raise JobError(f"{kind} does not run as a subprocess")
 
 

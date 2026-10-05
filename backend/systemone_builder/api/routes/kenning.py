@@ -128,6 +128,75 @@ async def datasets(rt: Runtime = Depends(get_rt)) -> list[dict[str, Any]]:
     return await asyncio.to_thread(kjobs.list_datasets, _home(rt))
 
 
+MAX_IMPORT_BYTES = 50 * 2**20
+
+
+class ImportRequest(BaseModel):
+    name: str
+    license: str = Field(min_length=1, max_length=200)
+    content: str = Field(max_length=MAX_IMPORT_BYTES)        # the JSONL text
+    questions: dict[str, Any] | None = None                    # for {state, labels} lines
+
+
+@router.get("/kenning/problems")
+async def problems(rt: Runtime = Depends(get_rt)) -> list[dict[str, Any]]:
+    return await asyncio.to_thread(kjobs.list_problems, _home(rt))
+
+
+@router.post("/kenning/problems")
+async def save_problem(spec: dict[str, Any], rt: Runtime = Depends(get_rt)) -> dict[str, Any]:
+    """Save a problem spec (validated) so data jobs can use it."""
+    from systemone_builder.kenning.problems import builtin_problems, parse_problem
+
+    try:
+        prob = parse_problem(spec)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if prob.name in builtin_problems():
+        raise HTTPException(409, f"{prob.name!r} is a built-in problem; pick another name")
+    d = kjobs.problems_dir(_home(rt))
+    d.mkdir(parents=True, exist_ok=True)
+    (d / f"{prob.name}.json").write_text(json.dumps(spec, indent=2, ensure_ascii=False), encoding="utf-8")
+    return prob.summary()
+
+
+@router.get("/kenning/imports")
+async def imports(rt: Runtime = Depends(get_rt)) -> list[dict[str, Any]]:
+    return await asyncio.to_thread(kjobs.list_imports, _home(rt))
+
+
+@router.post("/kenning/imports")
+async def upload_import(body: ImportRequest, rt: Runtime = Depends(get_rt)) -> dict[str, Any]:
+    """Upload your own labelled JSONL; it is validated line by line before it's kept."""
+    from systemone_builder.kenning import importer
+
+    if not kjobs.SLUG.match(body.name):
+        raise HTTPException(400, "name: lower-case letters, digits, '.', '_' or '-'")
+    d = kjobs.imports_dir(_home(rt))
+    if (d / f"{body.name}.jsonl").exists():
+        raise HTTPException(409, f"an import named {body.name!r} already exists")
+    d.mkdir(parents=True, exist_ok=True)
+    tmp = d / f".{body.name}.uploading.jsonl"
+    qtmp = d / f".{body.name}.uploading.questions.json"
+    tmp.write_text(body.content, encoding="utf-8", newline="")  # stored exactly as uploaded
+    if body.questions is not None:
+        qtmp.write_text(json.dumps(body.questions), encoding="utf-8")
+    try:
+        rows, questions = await asyncio.to_thread(importer.load_rows, tmp, qtmp if body.questions is not None else None)
+    except importer.InvalidData as exc:
+        tmp.unlink(missing_ok=True)
+        qtmp.unlink(missing_ok=True)
+        raise HTTPException(400, str(exc).replace(tmp.name, f"{body.name}.jsonl")
+                            .replace(qtmp.name, "questions")) from exc
+    tmp.replace(d / f"{body.name}.jsonl")
+    if body.questions is not None:
+        qtmp.replace(d / f"{body.name}.questions.json")
+    meta = {"rows": len(rows), "questions": sorted(questions), "license": body.license,
+            "uploaded": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+    (d / f"{body.name}.meta.json").write_text(json.dumps(meta, indent=1), encoding="utf-8")
+    return {"name": body.name, **meta}
+
+
 @router.get("/kenning/clef")
 async def clef(rt: Runtime = Depends(get_rt)) -> dict[str, Any]:
     try:

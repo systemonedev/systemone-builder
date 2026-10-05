@@ -50,8 +50,21 @@ export type Dataset = {
   modified: number;
   sources: Record<string, { rows?: number; license?: string; dataset?: string }>;
   teacher?: { model: string; alpha: number; agreement?: Record<string, { agreement: number }> } | null;
+  /** held-out benchmark items per problem or import, e.g. {"problem:computer_use": 50} */
+  holdouts?: Record<string, number>;
 };
-export type Base = { id: string; license: string; apache_release: boolean; recommended: boolean };
+/** A decision problem the builder can write training cases for (kenning/problems.py). */
+export type Problem = {
+  name: string;
+  title: string;
+  description: string;
+  state: string[];
+  questions: Record<string, string[]>;
+  builtin: boolean;
+};
+/** Your own labelled JSONL, uploaded on the Train page. */
+export type ImportFile = { name: string; rows: number | null; questions: string[]; license: string | null; size_bytes: number };
+export type Base ={ id: string; license: string; apache_release: boolean; recommended: boolean };
 
 export type GateMetrics = {
   hi: number;
