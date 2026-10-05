@@ -258,6 +258,49 @@ What it says:
 - Kenning answers about 4× faster. Clef's lead on records, tables, agent and logs is the case for the
   redesigned data (v0.5) and a longer-context model (Kenning-XL).
 
+### kenning-large-v0.5: data redesigned for structured state
+
+v0.5 keeps the same 435M cross-encoder but is trained on data built for the families v0.4 was weakest
+on: rule-generated records, tables, agent steps and logs with exact labels, plus teacher-written
+problem cases (agent guardrails, moderation, claims, log triage, change review, support threads) and
+added public splits (HelpSteer2, jailbreak, prompt-injection, ROPES). Trained at 512 tokens on ~15k
+balanced rows; **not** distilled from Clef this round (Clef's batch endpoint hangs on long inputs — a
+separate bug), so text calibration is unchanged from v0.4. Jev is `jev-latest` (hosted), included here
+at the user's request; its outputs are never used for training.
+
+Macro accuracy on `--suite general` (1,328 items; one RTX 3090 each; Jev over the network):
+
+| Family | v0.4 | **v0.5** | Clef-flash | Jev |
+|---|---|---|---|---|
+| **All 30 questions (macro)** | 0.625 | **0.679** | 0.813 | 0.840 |
+| agent (tool calls, task completion) | 0.553 | **0.727** | 0.793 | 0.900 |
+| conversation | 0.958 | **0.979** | 1.000 | 1.000 |
+| quality (helpful, correct) | 0.377 | **0.479** | 0.447 | 0.498 |
+| records (rules over JSON) | 0.535 | **0.587** | 0.857 | 0.921 |
+| table | 0.480 | **0.520** | 0.860 | 0.940 |
+| logs | 0.290 | **0.520** | 0.740 | 0.720 |
+| text (14 tasks) | 0.754 | 0.756 | 0.841 | 0.834 |
+| Latency p50 | 34 ms | 35 ms | 125 ms | 152 ms |
+
+What moved, per task (v0.4 → v0.5):
+- **Big wins from the new data.** Tool-call matches the request 0.50 → **0.84**; failing-service id 0.08 →
+  **0.52**; jailbreak 0.64 → **0.96**; goal completed 0.64 → **0.72**; answer helpfulness 0.33 → **0.44**;
+  claim-supported 0.62 → **0.70**; access allowed 0.70 → **0.80**.
+- **Kenning now leads both big engines** on prompt injection (0.82 vs Clef 0.62, Jev 0.76), jailbreak
+  (ties Jev at 0.96), answer helpfulness (0.44 vs 0.35 / 0.40) and goal completion (0.72 vs Clef 0.68).
+- **The cross-encoder ceiling is now explicit on numeric records.** Tasks needing arithmetic or
+  aggregation over a record did not improve and some regressed: over-daily-limit 0.50 → 0.42,
+  foreign-transaction 0.88 → 0.64, income-over-50k flat at 0.50 (chance). The model reads the rules and
+  values but cannot sum amounts or compare across rows. Tables improved only slightly (0.48 → 0.52),
+  held back by the 512-token cap truncating larger tables.
+
+Read this honestly: v0.5 closes a third of the gap to Clef (−19 → −13 macro) and overtakes both engines
+on safety and answer-quality judgements, at a twentieth of the size and 4× the speed. It does **not**
+match Clef on structured records and tables — numeric reasoning and long context are architecture
+limits, not data ones. That is the remit of **Kenning-XL** (a small decoder with a decision head, 4k+
+context, distilled from Clef). A Clef-distilled, 1024-token re-run of this same data is the other
+pending follow-up (blocked only by the Clef batch-endpoint hang).
+
 ### Multi-task suite (`--suite multi`)
 
 The text family of `general` on its own: 14 tasks, ~50 class-balanced items each (~680),
