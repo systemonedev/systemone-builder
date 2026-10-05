@@ -357,7 +357,7 @@ def cmd_label(a: argparse.Namespace) -> int:
     url = a.teacher_url or s.clef_url
     src = Path(a.data)
     dst = Path(a.out or src.with_name(src.stem + f"-{a.teacher_name}.jsonl"))
-    report = label_file(src, dst, url, a.teacher_name, a.alpha, a.batch, a.limit)
+    report = label_file(src, dst, url, a.teacher_name, a.alpha, a.batch, a.limit, skip_exact=not a.label_exact)
     print(f"wrote {dst}")
     for source, r in sorted(report.items()):
         print(f"  {source:<12} {r['questions']:>6} questions  teacher agrees with labels {r['agreement']:.1%}  "
@@ -564,6 +564,9 @@ def main(argv: list[str] | None = None) -> int:
     lb.add_argument("--alpha", type=float, default=0.5, help="1 = teacher only, 0.5 = average with existing labels")
     lb.add_argument("--batch", type=int, default=16)
     lb.add_argument("--limit", type=int, help="only the first N rows (quick checks)")
+    lb.add_argument("--label-exact", action="store_true",
+                    help="also send rule-generated (exact-label) rows to the teacher (default: pass them "
+                         "through untouched; their labels are exact and they are the slowest rows)")
     lb.set_defaults(fn=cmd_label)
     cb = sub.add_parser("calibrate", help="refit a Kenning model's temperatures on your own labelled data "
                                           "(the model must be the one being served)")
