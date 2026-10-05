@@ -155,7 +155,7 @@ async def synthetic_task_rows(s, datasets, per_task: int, seed: int):  # noqa: A
 
 
 async def problem_rows(s, datasets, ref: str, n: int, seed: int, holdout: float, teacher_url: str | None,  # noqa: ANN001
-                       teacher_model: str | None, check: bool):  # noqa: ANN201
+                       teacher_model: str | None, check: bool, no_think: bool = False, concurrency: int = 16):  # noqa: ANN201
     """Teacher-written rows for a problem spec, plus its held-out benchmark items (cases cached in datasets/)."""
     import re
 
@@ -179,7 +179,8 @@ async def problem_rows(s, datasets, ref: str, n: int, seed: int, holdout: float,
         stats: dict[str, int] = {}
         print(f"[kenning-data] asking {model} for {n} {prob.name} cases"
               f"{' (each checked blind by the teacher)' if check else ''} ...", flush=True)
-        cases = await problems.write_cases(prob, n, seed, url, model, key, concurrency=16, check=check, stats=stats)
+        cases = await problems.write_cases(prob, n, seed, url, model, key, concurrency=concurrency, check=check,
+                                           stats=stats, extra={"reasoning_effort": "none"} if no_think else None)
         print(f"[kenning-data] {prob.name}: {stats.get('asked', 0)} asked, {stats.get('written', 0)} written, "
               f"{stats.get('disagreed', 0)} failed the blind check, {len(cases)} kept", flush=True)
         if len(cases) < n:
@@ -238,10 +239,18 @@ def cmd_data(a: argparse.Namespace) -> int:
                 prow = await phishing_training_rows(4000, 7, cache)
                 phishing_file.write_text("".join(json.dumps(r) + "\n" for r in prow))
             extra = {}
+            if a.structured:
+                from systemone_builder.kenning import structured
+
+                for kind in structured.GENERATORS:
+                    extra[f"structured:{kind}"] = (structured.rows(kind, a.structured, a.seed), {
+                        "dataset": f"structured {kind} ({structured.FAMILY[kind]}): rule-generated, exact labels",
+                        "license": "generated (kenning/structured.py)"})
             for spec in a.problem or []:
                 ref, _, n = spec.partition("=")
                 prow, meta, hold = await problem_rows(s, datasets, ref, int(n or 500), a.seed, a.holdout,
-                                                      a.teacher_url, a.teacher_model, not a.no_check)
+                                                      a.teacher_url, a.teacher_model, not a.no_check,
+                                                      a.teacher_no_think, a.teacher_concurrency)
                 key = f"problem:{Path(ref).stem}"
                 extra[key] = (prow, meta)
                 if hold:
@@ -260,7 +269,8 @@ def cmd_data(a: argparse.Namespace) -> int:
             source_rows = {k: int(v) for k, v in (p.split("=") for p in a.source_rows.split(","))} if a.source_rows else None
             sources = None if not a.sources else [] if a.sources == "none" else a.sources.split(",")
             rows, manifest = await multitask_rows(a.per_source, a.seed, phishing_file if a.phishing_rows else None,
-                                                  a.phishing_rows, sources, a.layout_variation, extra, source_rows)
+                                                  a.phishing_rows, sources, a.layout_variation, extra, source_rows,
+                                                  a.genre_share)
             if holdouts:
                 hdir = out.with_suffix(".holdout")
                 hdir.mkdir(parents=True, exist_ok=True)
@@ -347,7 +357,7 @@ def cmd_label(a: argparse.Namespace) -> int:
     url = a.teacher_url or s.clef_url
     src = Path(a.data)
     dst = Path(a.out or src.with_name(src.stem + f"-{a.teacher_name}.jsonl"))
-    report = label_file(src, dst, url, a.teacher_name, a.alpha, a.batch, a.limit)
+    report = label_file(src, dst, url, a.teacher_name, a.alpha, a.batch, a.limit, skip_exact=not a.label_exact)
     print(f"wrote {dst}")
     for source, r in sorted(report.items()):
         print(f"  {source:<12} {r['questions']:>6} questions  teacher agrees with labels {r['agreement']:.1%}  "
@@ -517,8 +527,14 @@ def main(argv: list[str] | None = None) -> int:
     d.add_argument("-n", type=int, default=4000, help="phishing rows (--task phishing)")
     d.add_argument("--per-source", type=int, default=1200, help="rows per public dataset (--task multitask)")
     d.add_argument("--phishing-rows", type=int, default=1500, help="phishing rows mixed in (--task multitask)")
-    d.add_argument("--sources", help="comma-separated subset of: amazon, dbpedia, clinc, boolq, nli, civil; "
+    d.add_argument("--sources", help="comma-separated subset of: amazon, dbpedia, clinc, boolq, nli, civil, helpsteer, "
+                                     "jailbreak, injection, ropes; "
                                      "'none' for problem or imported data only")
+    d.add_argument("--structured", type=int, default=0, metavar="N",
+                   help="add N rule-generated rows per structured generator (records, tables, agent steps, logs; "
+                        "exact labels, see kenning/structured.py)")
+    d.add_argument("--genre-share", type=float, default=0.3,
+                   help="share of public-source rows that also ask 'what kind of text is this?' (0 = none)")
     d.add_argument("--problem", action="append", metavar="NAME[=ROWS]",
                    help="add teacher-written cases for a problem spec: a built-in name (see `systemone problems`), a "
                         "spec saved on the Train page, or a path to a spec JSON; ROWS defaults to 500 (repeatable)")
@@ -532,6 +548,9 @@ def main(argv: list[str] | None = None) -> int:
     d.add_argument("--teacher-url", help="OpenAI-compatible base URL of the teacher that writes problem cases "
                                          "(default: the triage model); key in S1_TEACHER_API_KEY if it needs one")
     d.add_argument("--teacher-model", help="teacher model name (required with --teacher-url)")
+    d.add_argument("--teacher-no-think", action="store_true",
+                   help="send reasoning_effort=none, turning off a reasoning teacher's thinking (Ollama, recent vLLM)")
+    d.add_argument("--teacher-concurrency", type=int, default=16, help="parallel teacher requests")
     d.add_argument("--no-check", action="store_true",
                    help="keep problem cases without the teacher's blind check (faster, noisier labels)")
     d.add_argument("--synthetic-email", type=int, default=0, metavar="N",
@@ -545,6 +564,9 @@ def main(argv: list[str] | None = None) -> int:
     lb.add_argument("--alpha", type=float, default=0.5, help="1 = teacher only, 0.5 = average with existing labels")
     lb.add_argument("--batch", type=int, default=16)
     lb.add_argument("--limit", type=int, help="only the first N rows (quick checks)")
+    lb.add_argument("--label-exact", action="store_true",
+                    help="also send rule-generated (exact-label) rows to the teacher (default: pass them "
+                         "through untouched; their labels are exact and they are the slowest rows)")
     lb.set_defaults(fn=cmd_label)
     cb = sub.add_parser("calibrate", help="refit a Kenning model's temperatures on your own labelled data "
                                           "(the model must be the one being served)")

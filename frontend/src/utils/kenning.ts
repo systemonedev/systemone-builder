@@ -27,7 +27,7 @@ export type KenningStatus = {
 };
 
 // ---------------------------------------------------------- Train / Verify
-export type JobKind = "data" | "label" | "train" | "bench";
+export type JobKind = "data" | "label" | "train" | "bench" | "recipe";
 export type JobStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled" | "interrupted";
 export type Job = {
   id: string;

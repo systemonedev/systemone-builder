@@ -18,6 +18,10 @@ const SOURCES: { id: string; dataset: string; license: string; clean: boolean }[
   { id: "civil", dataset: "google/civil_comments", license: "CC0-1.0", clean: true },
   { id: "boolq", dataset: "google/boolq", license: "CC-BY-SA-3.0", clean: false },
   { id: "dbpedia", dataset: "fancyzhx/dbpedia_14", license: "CC-BY-SA-3.0", clean: false },
+  { id: "helpsteer", dataset: "nvidia/HelpSteer2 (train): answer quality", license: "CC-BY-4.0", clean: true },
+  { id: "jailbreak", dataset: "jackhhao/jailbreak-classification (train)", license: "Apache-2.0", clean: true },
+  { id: "injection", dataset: "deepset/prompt-injections (train)", license: "Apache-2.0", clean: true },
+  { id: "ropes", dataset: "allenai/ropes (train): passage reasoning", license: "CC-BY-4.0", clean: true },
 ];
 const CLEAN_ROWS = "nli=20000, clinc=3000, amazon=2000, civil=2000";
 
@@ -196,6 +200,183 @@ const PRESETS: { id: Preset; label: string; note: string }[] = [
   { id: "general", label: "General multi-task", note: "The clean-licence recipe behind kenning-large-v0.4." },
 ];
 
+function RecipeCard({ pipeline, reload }: { pipeline: boolean; reload: () => void }) {
+  const problems = usePoll<Problem[]>("/kenning/problems", 0);
+  const clef = usePoll<{ online: boolean }>("/kenning/clef", 15000);
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("kenning-v0.5");
+  const [sources, setSources] = useState<string[]>(SOURCES.filter((x) => x.clean).map((x) => x.id));
+  const [structured, setStructured] = useState(1200);
+  const [picked, setPicked] = useState<Record<string, number>>({});
+  const [teacherPick, setTeacher] = useState<"triage" | "custom" | null>(null);
+  const [teacherUrl, setTeacherUrl] = useState("");
+  const [teacherModel, setTeacherModel] = useState("");
+  const [distill, setDistill] = useState(true);
+  const [epochs, setEpochs] = useState(2);
+  const [maxLen, setMaxLen] = useState(1024);
+  const [withClef, setWithClef] = useState(true);
+  const teacher = teacherPick ?? (pipeline ? "triage" : "custom");
+  const needsTeacher = Object.keys(picked).length > 0;
+  const teacherOk = !needsTeacher || (teacher === "triage" ? pipeline : !!teacherUrl && !!teacherModel);
+  const toggle = (id: string) => setSources((x) => (x.includes(id) ? x.filter((y) => y !== id) : [...x, id]));
+  const hasData = sources.length > 0 || structured > 0 || needsTeacher;
+  const clefOnline = !!clef.data?.online;
+
+  return (
+    <Card
+      title="0 · One-click recipe"
+      actions={
+        <Button variant={open ? "ghost" : "primary"} onClick={() => setOpen((o) => !o)}>
+          {open ? "Close" : "New model"}
+        </Button>
+      }
+    >
+      <p className="mb-3 text-xs text-ink-3">
+        The whole pipeline as one job: build a dataset &rarr; distil with Clef &rarr; train &rarr; benchmark on the
+        general suite &mdash; then the model is served and ready. Runs the stages in order on your GPU(s).
+      </p>
+      {open && (
+        <div className="mb-4 space-y-4 rounded-md border border-line p-3">
+          <Field label="Model name">
+            <input className={inputCls} value={name} onChange={(e) => setName(slug(e.target.value))} />
+          </Field>
+
+          <section className="space-y-2">
+            <div className="text-xs font-medium text-ink-2">Data</div>
+            <div className="grid gap-1">
+              {SOURCES.map((x) => (
+                <label key={x.id} className="flex items-center gap-2 text-[13px] text-ink-2">
+                  <input type="checkbox" checked={sources.includes(x.id)} onChange={() => toggle(x.id)} />
+                  <span>{x.dataset}</span>
+                  <span className="ml-auto whitespace-nowrap text-xs" style={{ color: x.clean ? "var(--text-muted)" : "var(--warning)" }}>
+                    {x.license}
+                  </span>
+                </label>
+              ))}
+            </div>
+            <Field label="Structured decisions per generator (records, tables, agent steps, logs; exact labels)">
+              <input type="number" className={inputCls} value={structured} min={0} onChange={(e) => setStructured(Number(e.target.value))} />
+            </Field>
+            <div>
+              <div className="mb-1 text-xs text-ink-3">Your problems (teacher-written, blind-checked; optional)</div>
+              <div className="grid gap-1">
+                {(problems.data ?? []).map((pr) => (
+                  <label key={pr.name} className="flex items-start gap-2 text-[13px] text-ink-2">
+                    <input
+                      type="checkbox"
+                      className="mt-1"
+                      checked={pr.name in picked}
+                      onChange={() =>
+                        setPicked((x) => {
+                          const next = { ...x };
+                          if (pr.name in next) delete next[pr.name];
+                          else next[pr.name] = 1000;
+                          return next;
+                        })
+                      }
+                    />
+                    <span className="min-w-0 flex-1">
+                      <span className="font-medium text-ink">{pr.title}</span>
+                      {!pr.builtin && <span className="ml-1 text-xs text-ink-3">(yours)</span>}
+                    </span>
+                    {pr.name in picked && (
+                      <span className="w-24 shrink-0">
+                        <input
+                          type="number"
+                          min={20}
+                          className={inputCls}
+                          value={picked[pr.name]}
+                          aria-label={`${pr.title}: cases`}
+                          onChange={(e) => setPicked((x) => ({ ...x, [pr.name]: Number(e.target.value) }))}
+                        />
+                      </span>
+                    )}
+                  </label>
+                ))}
+              </div>
+              {needsTeacher && (
+                <div className="mt-2 space-y-2 rounded-md bg-surface p-2">
+                  <div className="flex flex-wrap items-center gap-3 text-[13px] text-ink-2">
+                    <span className="text-xs text-ink-3">Teacher that writes the cases:</span>
+                    <label className="flex items-center gap-1">
+                      <input type="radio" checked={teacher === "triage"} onChange={() => setTeacher("triage")} disabled={!pipeline} />
+                      the pipeline&apos;s triage LLM{pipeline ? "" : " (not running)"}
+                    </label>
+                    <label className="flex items-center gap-1">
+                      <input type="radio" checked={teacher === "custom"} onChange={() => setTeacher("custom")} />
+                      another OpenAI-compatible server
+                    </label>
+                  </div>
+                  {teacher === "custom" && (
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <Field label="Base URL">
+                        <input className={inputCls} value={teacherUrl} placeholder="http://localhost:8001/v1" onChange={(e) => setTeacherUrl(e.target.value.trim())} />
+                      </Field>
+                      <Field label="Model">
+                        <input className={inputCls} value={teacherModel} placeholder="writer" onChange={(e) => setTeacherModel(e.target.value.trim())} />
+                      </Field>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </section>
+
+          <section className="grid gap-3 sm:grid-cols-2">
+            <label className="col-span-full flex items-center gap-2 text-[13px] text-ink-2">
+              <input type="checkbox" checked={distill} onChange={() => setDistill((d) => !d)} disabled={!clefOnline} />
+              Distil with Clef {clefOnline ? "" : "(Clef offline — will train on base labels)"}
+            </label>
+            <Field label="Epochs">
+              <input type="number" step={0.5} min={0.5} className={inputCls} value={epochs} onChange={(e) => setEpochs(Number(e.target.value))} />
+            </Field>
+            <Field label="Max tokens (context)">
+              <input type="number" step={64} min={128} className={inputCls} value={maxLen} onChange={(e) => setMaxLen(Number(e.target.value))} />
+            </Field>
+            <label className="col-span-full flex items-center gap-2 text-[13px] text-ink-2">
+              <input type="checkbox" checked={withClef && clefOnline} onChange={() => setWithClef((c) => !c)} disabled={!clefOnline} />
+              Benchmark against Clef as well as Kenning
+            </label>
+          </section>
+
+          <Button
+            variant="primary"
+            disabled={!name || !hasData || !teacherOk}
+            onClick={async () => {
+              const job = await startJob("recipe", {
+                name,
+                distill,
+                alpha: 0.5,
+                data: {
+                  sources,
+                  structured,
+                  genre_share: 0,
+                  phishing_rows: 0,
+                  problems: picked,
+                  ...(needsTeacher && teacher === "custom" ? { teacher_url: teacherUrl, teacher_model: teacherModel } : {}),
+                },
+                train: { epochs, max_length: maxLen },
+                bench: { suites: ["general"], engines: withClef && clefOnline ? ["kenning", "clef"] : ["kenning"] },
+              });
+              if (job) {
+                setOpen(false);
+                reload();
+              }
+            }}
+          >
+            Build, train and benchmark {name}
+          </Button>
+          {!teacherOk && <p className="text-xs" style={{ color: "var(--warning)" }}>Pick a teacher for the problem cases.</p>}
+          <p className="text-xs text-ink-3">
+            One job, several hours: generation and distillation are the long stages. Watch progress on the right; the
+            finished model is activated and shows on <span className="text-ink-2">Verify</span>.
+          </p>
+        </div>
+      )}
+    </Card>
+  );
+}
+
 function DataCard({ datasets, pipeline, reload }: { datasets: Dataset[]; pipeline: boolean; reload: () => void }) {
   const problems = usePoll<Problem[]>("/kenning/problems", 0);
   const imports = usePoll<ImportFile[]>("/kenning/imports", 0);
@@ -216,6 +397,8 @@ function DataCard({ datasets, pipeline, reload }: { datasets: Dataset[]; pipelin
   const [phishing, setPhishing] = useState(0);
   const [synthEmail, setSynthEmail] = useState(0);
   const [synthTasks, setSynthTasks] = useState(0);
+  const [structured, setStructured] = useState(0);
+  const [genreShare, setGenreShare] = useState(0.3);
   const toggle = (id: string) => setSources((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
   const nonClean = sources.filter((id) => !SOURCES.find((s) => s.id === id)?.clean);
   const withProblem = preset !== "general";
@@ -224,7 +407,7 @@ function DataCard({ datasets, pipeline, reload }: { datasets: Dataset[]; pipelin
   const chosenImports = withProblem ? picks : [];
   const needsTeacher = Object.keys(chosenProblems).length > 0;
   const teacherOk = !needsTeacher || (teacher === "triage" ? pipeline : !!teacherUrl && !!teacherModel);
-  const hasData = (withGeneral && sources.length > 0) || needsTeacher || chosenImports.length > 0 || phishing > 0;
+  const hasData = (withGeneral && (sources.length > 0 || structured > 0)) || needsTeacher || chosenImports.length > 0 || phishing > 0;
 
   return (
     <Card
@@ -381,6 +564,12 @@ function DataCard({ datasets, pipeline, reload }: { datasets: Dataset[]; pipelin
                 <Field label={`Synthetic tasks per task${pipeline ? "" : " (needs the pipeline's triage LLM)"}`}>
                   <input type="number" className={inputCls} value={synthTasks} min={0} disabled={!pipeline} onChange={(e) => setSynthTasks(Number(e.target.value))} />
                 </Field>
+                <Field label="Structured decisions per generator (records, tables, agent steps, logs; exact labels)">
+                  <input type="number" className={inputCls} value={structured} min={0} onChange={(e) => setStructured(Number(e.target.value))} />
+                </Field>
+                <Field label={`"What kind of text is this?" questions: ${Math.round(genreShare * 100)}% of public rows`}>
+                  <input type="range" min={0} max={0.5} step={0.05} value={genreShare} onChange={(e) => setGenreShare(Number(e.target.value))} className="w-full" />
+                </Field>
               </div>
             </section>
           )}
@@ -409,6 +598,8 @@ function DataCard({ datasets, pipeline, reload }: { datasets: Dataset[]; pipelin
                 phishing_rows: phishing,
                 synthetic_email: synthEmail,
                 synthetic_tasks: withGeneral ? synthTasks : 0,
+                structured: withGeneral ? structured : 0,
+                genre_share: genreShare,
                 problems: chosenProblems,
                 imports: chosenImports,
                 holdout,
@@ -600,7 +791,7 @@ export default function TrainPage() {
   const onFinished = useCallback(
     (j: Job) => {
       reloadDatasets();
-      if (j.kind === "train" && j.status === "succeeded") setDone(j);
+      if ((j.kind === "train" || j.kind === "recipe") && j.status === "succeeded") setDone(j);
     },
     [reloadDatasets],
   );
@@ -628,12 +819,13 @@ export default function TrainPage() {
       )}
       <div className="grid gap-4 xl:grid-cols-2">
         <div className="space-y-4">
+          <RecipeCard pipeline={!!status.data?.pipeline} reload={datasets.reload} />
           <DataCard datasets={list} pipeline={!!status.data?.pipeline} reload={datasets.reload} />
           <LabelCard datasets={list} />
           <TrainCard datasets={list} bases={bases.data ?? []} />
         </div>
         <div>
-          <JobsPanel kinds={["data", "label", "train"]} onFinished={onFinished} />
+          <JobsPanel kinds={["recipe", "data", "label", "train"]} onFinished={onFinished} />
         </div>
       </div>
     </div>

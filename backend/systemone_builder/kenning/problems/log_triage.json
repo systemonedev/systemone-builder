@@ -1,0 +1,16 @@
+{
+  "name": "log_triage",
+  "title": "On-call log triage",
+  "description": "Read a short excerpt of application logs and decide whether to page, how severe, and which service.",
+  "writes": "a short excerpt (6-15 lines) of real-looking application or infrastructure logs during an incident or normal operation",
+  "state": {"fields": {"service_map": "the services involved and what they do, 1-3 lines", "log": "the raw log lines, newest last"}},
+  "questions": [
+    {"id": "page_oncall", "ask": ["Should on-call be paged for this?", "Does this log excerpt warrant waking someone up?"],
+     "labels": {"yes": "a real, user-affecting problem is underway", "no": "healthy, or noise that can wait for business hours"}},
+    {"id": "severity", "ask": ["How severe is what the logs show?"], "ordinal": true,
+     "labels": {"none": "normal operation", "low": "minor or self-recovering", "high": "degraded for users", "critical": "outage or data at risk"}},
+    {"id": "signal", "ask": ["What is the main problem signal, if any?"],
+     "labels": {"none": "nothing wrong", "errors": "error/exception spikes", "latency": "slow responses or timeouts", "saturation": "cpu/memory/disk/connection limits", "auth": "authentication or permission failures"}}
+  ],
+  "constraints": [{"if": {"page_oncall": "no"}, "then": {"severity": ["none", "low"]}}, {"if": {"severity": "none"}, "then": {"signal": "none", "page_oncall": "no"}}]
+}

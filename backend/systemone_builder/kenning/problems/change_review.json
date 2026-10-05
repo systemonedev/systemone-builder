@@ -1,0 +1,16 @@
+{
+  "name": "change_review",
+  "title": "Automated change review",
+  "description": "Given a proposed code, config, or infrastructure change, decide whether it is safe to auto-apply, how risky, and whether it needs a human reviewer.",
+  "writes": "a proposed change to a software system: a diff summary, a config edit, an infrastructure change, or a dependency bump",
+  "state": {"fields": {"context": "what the system is and the change's stated purpose", "change": "the proposed change itself (diff, config, or command)"}},
+  "questions": [
+    {"id": "safe_to_auto_apply", "ask": ["Is this change safe to apply automatically without a human?"],
+     "labels": {"yes": "low blast radius and easily reversible", "no": "needs a human to look first"}},
+    {"id": "breaking", "ask": ["Could this change break production or existing behavior?"],
+     "labels": {"yes": "plausibly breaks callers, data, or availability", "no": "additive or isolated"}},
+    {"id": "risk_area", "ask": ["Which area carries the most risk here?"],
+     "labels": {"none": "trivial", "data": "migrations, deletes, schema", "security": "auth, secrets, permissions, exposure", "availability": "deploys, scaling, networking", "dependency": "version bumps, supply chain"}}
+  ],
+  "constraints": [{"if": {"safe_to_auto_apply": "yes"}, "then": {"breaking": "no"}}, {"if": {"breaking": "yes"}, "then": {"safe_to_auto_apply": "no"}}]
+}

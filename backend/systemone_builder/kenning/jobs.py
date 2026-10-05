@@ -40,10 +40,10 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
-KINDS = ("data", "label", "train", "bench")
+KINDS = ("data", "label", "train", "bench", "recipe")
 SUITES = ("general", "multi", "modern2", "modern", "phishing", "layouts", "ood")
 ENGINES = ("kenning", "clef", "jev", "local")
-DATA_SOURCES = ("amazon", "dbpedia", "clinc", "boolq", "nli", "civil")
+DATA_SOURCES = ("amazon", "dbpedia", "clinc", "boolq", "nli", "civil", "helpsteer", "jailbreak", "injection", "ropes")
 SLUG = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 HF_ID = re.compile(r"^[A-Za-z0-9][\w.-]{0,95}/[\w.-]{1,96}$")
 URL = re.compile(r"^https?://[\w.-]+(:\d+)?(/[\w./-]*)?$")
@@ -174,7 +174,7 @@ def validate(kind: str, p: dict[str, Any], home: Path, *, pipeline: bool, has_je
         have = {x["name"] for x in list_imports(home)}
         if not isinstance(imports, list) or any(not isinstance(x, str) or x not in have for x in imports):
             raise JobError("imports must be names of uploaded files")
-        if not sources and not probs and not imports and not _int(p, "phishing_rows", 0, 0, 50_000):
+        if not sources and not probs and not imports and not _int(p, "phishing_rows", 0, 0, 50_000)                 and not _int(p, "structured", 0, 0, 50_000):
             raise JobError("pick at least one source, problem, import or phishing rows")
         teacher_url = p.get("teacher_url") or None
         if teacher_url is not None and (not isinstance(teacher_url, str) or not URL.match(teacher_url)):
@@ -199,6 +199,8 @@ def validate(kind: str, p: dict[str, Any], home: Path, *, pipeline: bool, has_je
                "synthetic_tasks": _int(p, "synthetic_tasks", 0, 0, 10_000),
                "layout_variation": _float(p, "layout_variation", 0.75, 0.0, 1.0),
                "seed": _int(p, "seed", 7, 0, 2**31 - 1),
+               "structured": _int(p, "structured", 0, 0, 50_000),
+               "genre_share": _float(p, "genre_share", 0.3, 0.0, 1.0),
                "problems": {k: _int(probs, k, 500, 20, 20_000) for k in probs},
                "imports": list(dict.fromkeys(imports)),
                "holdout": _float(p, "holdout", 0.1, 0.0, 0.5),
@@ -231,6 +233,8 @@ def validate(kind: str, p: dict[str, Any], home: Path, *, pipeline: bool, has_je
                 "lr": _float(p, "lr", 1e-5, 1e-7, 1e-3), "epochs": _float(p, "epochs", 1.0, 0.05, 20.0),
                 "batch_groups": _int(p, "batch_groups", 8, 1, 128), "max_length": _int(p, "max_length", 512, 64, 4096),
                 "max_pairs": _int(p, "max_pairs", 48, 4, 512), "seed": _int(p, "seed", 13, 0, 2**31 - 1)}
+    if kind == "recipe":
+        return _validate_recipe(p, home, pipeline=pipeline, has_jev_key=has_jev_key)
     # bench
     suites = p.get("suites") or ["general"]
     engines = p.get("engines") or ["kenning"]
@@ -253,6 +257,49 @@ def validate(kind: str, p: dict[str, Any], home: Path, *, pipeline: bool, has_je
             "confirm_paid": p.get("confirm_paid") is True}
 
 
+def _validate_recipe(p: dict[str, Any], home: Path, *, pipeline: bool, has_jev_key: bool) -> dict[str, Any]:
+    """One chained run: generate data -> (distil) -> train -> benchmark. Validates every stage up front.
+
+    The later stages' inputs don't exist yet, so their *parameters* are checked here (ranges, names free)
+    while existence checks that only make sense after the data stage are deferred to run time.
+    """
+    name = _slug(p, "name")
+    if (home / "models" / name).exists():
+        raise JobError(f"a model named {name!r} already exists")
+    dataset, labelled = f"{name}-data", f"{name}-data-clef"
+    # data stage: reuse the data validator with the derived dataset name (all its checks apply)
+    data = validate("data", {**(p.get("data") or {}), "name": dataset}, home, pipeline=pipeline, has_jev_key=has_jev_key)
+    # train stage: validate parameters only (the dataset is produced by stage 1)
+    tr = p.get("train") or {}
+    base = tr.get("base", "MoritzLaurer/deberta-v3-large-zeroshot-v2.0-c")
+    if not isinstance(base, str) or not HF_ID.match(base):
+        raise JobError("train.base must be a Hugging Face model id (org/name)")
+    train = {"base": base, "lr": _float(tr, "lr", 1e-5, 1e-7, 1e-3), "epochs": _float(tr, "epochs", 2.0, 0.05, 20.0),
+             "batch_groups": _int(tr, "batch_groups", 8, 1, 128), "max_length": _int(tr, "max_length", 1024, 64, 4096),
+             "max_pairs": _int(tr, "max_pairs", 48, 4, 512), "seed": _int(tr, "seed", 13, 0, 2**31 - 1)}
+    # bench stage: built-in suites only (the dataset's own hold-outs don't exist until stage 1 runs)
+    bn = p.get("bench") or {}
+    suites = bn.get("suites") or ["general"]
+    if not isinstance(suites, list) or any(x not in SUITES for x in suites):
+        raise JobError(f"recipe bench suites must be a subset of {', '.join(SUITES)}")
+    engines = bn.get("engines") or ["kenning", "clef"]
+    if not isinstance(engines, list) or not engines or any(e not in ENGINES for e in engines):
+        raise JobError(f"engines must be a subset of {', '.join(ENGINES)}")
+    if "jev" in engines:
+        if not has_jev_key:
+            raise JobError("Jev needs TYPESAFE_API_KEY in .env")
+        if bn.get("confirm_paid") is not True:
+            raise JobError("Jev requests are billed under your TypeSafe agreement: confirm_paid must be true")
+    if "local" in engines and not pipeline:
+        raise JobError("the 'local' engine reads the triage LLM: it needs the pipeline profile")
+    bench = {"suites": list(dict.fromkeys(suites)), "engines": list(dict.fromkeys(engines)),
+             "n": _int(bn, "n", 50, 5, 1000), "repeat_check": _int(bn, "repeat_check", 5, 0, 100),
+             "confirm_paid": bn.get("confirm_paid") is True}
+    return {"name": name, "model": name, "dataset": dataset, "labelled": labelled,
+            "distill": p.get("distill", True) is not False, "alpha": _float(p, "alpha", 0.5, 0.0, 1.0),
+            "data": data, "train": train, "bench": bench}
+
+
 def commands(kind: str, p: dict[str, Any], home: Path, clef_url: str) -> list[list[str]]:
     """Argument lists for the subprocess jobs (data, label, bench)."""
     cli = [sys.executable, "-m", "systemone_builder.cli"]
@@ -267,6 +314,10 @@ def commands(kind: str, p: dict[str, Any], home: Path, clef_url: str) -> list[li
             argv += ["--synthetic-email", str(p["synthetic_email"]), "--subtle-share", str(p["subtle_share"])]
         if p["synthetic_tasks"]:
             argv += ["--synthetic-tasks", str(p["synthetic_tasks"])]
+        if p.get("structured"):
+            argv += ["--structured", str(p["structured"])]
+        if "genre_share" in p:
+            argv += ["--genre-share", str(p["genre_share"])]
         for name, rows in p.get("problems", {}).items():
             argv += ["--problem", f"{name}={rows}"]
         for name in p.get("imports", []):
@@ -398,7 +449,9 @@ class KenningJobs:
         job.update(status="running", started=time.time())
         self._save(job)
         try:
-            if job["kind"] == "train":
+            if job["kind"] == "recipe":
+                await self._recipe(job)
+            elif job["kind"] == "train":
                 await self._train(job)
             elif job["kind"] == "label":
                 await self._label(job)
@@ -470,20 +523,26 @@ class KenningJobs:
                 except Exception as exc:  # noqa: BLE001
                     self._log(job, f"[job] could not restart {name}: {exc} (start it with docker compose up -d)")
 
-    async def _label(self, job: dict[str, Any]) -> None:
+    async def _clef_healthy(self) -> bool:
         try:
             async with httpx.AsyncClient(timeout=5) as c:
                 (await c.get(f"{self.s.clef_url.rstrip('/')}/health")).raise_for_status()
+            return True
         except httpx.HTTPError:
+            return False
+
+    async def _label(self, job: dict[str, Any], params: dict[str, Any] | None = None) -> None:
+        params = params or job["params"]
+        if not await self._clef_healthy():
             raise JobError("Clef is not running: docker compose --profile clef up -d clef "
-                           "(it needs most of a 24 GB GPU)") from None
+                           "(it needs most of a 24 GB GPU)")
         # Clef labelling in batches fills the GPU: pause the other services on it.
         async with self._gpu(job, self.s.clef_gpu, keep=self.s.clef_container):
-            for argv in commands("label", job["params"], self.home, self.s.clef_url):
+            for argv in commands("label", params, self.home, self.s.clef_url):
                 await self._subprocess(job, argv)
 
-    async def _train(self, job: dict[str, Any]) -> None:
-        p, s = job["params"], self.s
+    async def _train(self, job: dict[str, Any], params: dict[str, Any] | None = None) -> None:
+        p, s = params or job["params"], self.s
         ws = s.workspace_container_path
         out = f"{ws}/kenning/models/{p['name']}"
         command = ["python", "-m", "systemone_builder.kenning.train",
@@ -518,6 +577,43 @@ class KenningJobs:
             raise JobError("cancelled" if self._cancel else f"training exited with code {code}")
         summary = registry.summary(self.home, p["name"])
         job["result"] = {"model": p["name"], "heldout": summary["heldout"]}
+
+    async def _recipe(self, job: dict[str, Any]) -> None:
+        """Generate -> distil (optional) -> train -> activate + benchmark, as one job."""
+        rp = job["params"]
+        self._log(job, f"[recipe] stage 1/4: generate dataset {rp['dataset']}")
+        for argv in commands("data", rp["data"], self.home, self.s.clef_url):
+            await self._subprocess(job, argv)
+        train_dataset = rp["dataset"]
+        if rp["distill"] and await self._clef_healthy():
+            self._log(job, f"[recipe] stage 2/4: distil labels with Clef -> {rp['labelled']}")
+            await self._label(job, {"dataset": rp["dataset"], "name": rp["labelled"], "alpha": rp["alpha"],
+                                    "batch": 16, "limit": 0})
+            train_dataset = rp["labelled"]
+        else:
+            why = "distillation off" if not rp["distill"] else "Clef not running"
+            self._log(job, f"[recipe] stage 2/4: {why}; training on base labels")
+        self._log(job, f"[recipe] stage 3/4: train {rp['model']} on {train_dataset}")
+        await self._train(job, {**rp["train"], "dataset": train_dataset, "name": rp["model"]})
+        self._log(job, f"[recipe] stage 4/4: activate {rp['model']} and benchmark")
+        await self._activate_and_bench(job, rp)
+
+    async def _activate_and_bench(self, job: dict[str, Any], rp: dict[str, Any]) -> None:
+        url = self.s.kenning_url.rstrip("/")
+        async with httpx.AsyncClient(timeout=300) as c:
+            for _ in range(60):  # kenning was restarted after training freed its GPU
+                try:
+                    (await c.get(f"{url}/health")).raise_for_status()
+                    break
+                except httpx.HTTPError:
+                    await asyncio.sleep(5)
+            r = await c.post(f"{url}/admin/load", json={"model": rp["model"]})
+            if r.status_code != 200:
+                raise JobError(f"could not serve {rp['model']} for benchmarking: {r.text[:200]}")
+        registry.set_active(self.home, rp["model"])
+        self._log(job, f"[recipe] serving {rp['model']}")
+        for argv in commands("bench", rp["bench"], self.home, self.s.clef_url):
+            await self._subprocess(job, argv)
 
     async def _autosave(self, job: dict[str, Any]) -> None:
         while True:
