@@ -216,7 +216,7 @@ function RunExplorer({ file }: { file: string }) {
 }
 
 function RunCard({ engines, status }: { engines: EngineInfo[]; status: KenningStatus | null }) {
-  const [suites, setSuites] = useState<string[]>(["modern2"]);
+  const [suites, setSuites] = useState<string[]>(["general"]);
   const [picked, setPicked] = useState<string[]>(["kenning"]);
   const [n, setN] = useState(50);
   const [paid, setPaid] = useState(false);

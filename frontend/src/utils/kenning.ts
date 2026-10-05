@@ -84,11 +84,14 @@ export type EngineReport = {
   questions: Record<string, QuestionMetrics>;
   /** multi-task suites: mean per-task accuracy */
   macro_accuracy?: number | null;
+  /** general suite: macro accuracy per family */
+  family_accuracy?: Record<string, number>;
 };
 export type BenchSummary = { file: string; ts: number; suite: string; description?: string; gate?: string; items: number; reports: EngineReport[] };
 
 /** id: the `--suite` value; name: the suite name stored in result files. */
 export const SUITES: { id: string; name: string; label: string; note: string }[] = [
+  { id: "general", name: "general", label: "General (headline)", note: "Text, tables, conversations, agents, answer quality, records and logs: the general-purpose measure" },
   { id: "multi", name: "multi", label: "Multi-task (14 tasks)", note: "~680 items over 14 decision tasks never trained on; headline: macro accuracy" },
   { id: "modern2", name: "modern_email_2", label: "Modern emails 2", note: "20 held-out modern emails, incl. calm credential lures" },
   { id: "modern", name: "modern_email", label: "Modern emails", note: "20 hand-written modern emails (training scenarios were designed after seeing it)" },
