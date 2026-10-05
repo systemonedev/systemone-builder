@@ -289,7 +289,7 @@ async def multitask_rows(per_source: int, seed: int, phishing_file: Path | None 
     rows: list[dict[str, Any]] = []
     manifest: dict[str, Any] = {"seed": seed, "sources": {}}
     async with httpx.AsyncClient(timeout=60) as client:
-        for key in sources or list(SOURCES):
+        for key in list(SOURCES) if sources is None else sources:
             src = SOURCES[key]
             got = await sample_source(client, src, (source_rows or {}).get(key, per_source), random.Random(rng.random()))
             rows.extend(got)

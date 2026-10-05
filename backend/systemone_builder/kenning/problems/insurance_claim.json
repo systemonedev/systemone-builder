@@ -1,0 +1,50 @@
+{
+  "name": "insurance_claim",
+  "title": "Insurance claim intake",
+  "description": "Triage a home or travel insurance claim record: is it covered, what's missing, how fast to handle it.",
+  "writes": "a home or travel insurance claim as submitted through an online form",
+  "state": {
+    "fields": {
+      "policy": "policy type, coverage limits and the main exclusions, 2-4 lines",
+      "claim": "what happened, when, where and the amount claimed",
+      "documents": "the documents attached so far, comma-separated (may be few)"
+    }
+  },
+  "questions": [
+    {
+      "id": "likely_covered",
+      "ask": [
+        "Is this claim likely covered by the policy?",
+        "Does the policy appear to cover this loss?"
+      ],
+      "labels": {
+        "yes": "the loss fits the coverage and no exclusion applies",
+        "no": "an exclusion applies or the loss is outside the coverage"
+      }
+    },
+    {
+      "id": "missing_info",
+      "ask": [
+        "What is the main thing missing before this claim can be assessed?"
+      ],
+      "labels": {
+        "nothing": "enough to assess",
+        "proof_of_loss": "receipts, photos or a police or incident report",
+        "proof_of_ownership": "evidence the item belonged to the claimant",
+        "dates": "when it happened is unclear"
+      }
+    },
+    {
+      "id": "urgency",
+      "ordinal": true,
+      "ask": [
+        "How urgently should this claim be handled?"
+      ],
+      "labels": {
+        "routine": "no time pressure",
+        "soon": "the customer is out of pocket or inconvenienced",
+        "urgent": "the customer is stranded, unsafe or without a home"
+      }
+    }
+  ]
+}

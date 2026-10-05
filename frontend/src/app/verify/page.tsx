@@ -6,7 +6,7 @@ import { Button, Card, Empty, ErrorNote, Field, PageTitle, StatusPill, inputCls 
 import { api } from "@/utils/api";
 import { fmtMs, fmtNum, fmtPct } from "@/utils/format";
 import { usePoll } from "@/utils/hooks";
-import { SUITES, reportLabel, type BenchSummary, type EngineReport, type KenningStatus, type QuestionMetrics } from "@/utils/kenning";
+import { SUITES, reportLabel, type BenchSummary, type Dataset, type EngineReport, type KenningStatus, type QuestionMetrics } from "@/utils/kenning";
 import { notify } from "@/utils/notify";
 
 type EngineInfo = { id: string; name: string; available: boolean; note?: string };
@@ -221,6 +221,15 @@ function RunCard({ engines, status }: { engines: EngineInfo[]; status: KenningSt
   const [n, setN] = useState(50);
   const [paid, setPaid] = useState(false);
   const clef = usePoll<{ online: boolean }>("/kenning/clef", 15000);
+  const datasets = usePoll<Dataset[]>("/kenning/datasets", 30000);
+  // problems and imports held out when their dataset was built: benchmark the model on your own problem
+  const holdouts = (datasets.data ?? []).flatMap((d) =>
+    Object.entries(d.holdouts ?? {}).map(([key, items]) => ({
+      id: `holdout:${d.name}/${key}`,
+      label: key.replace(/^(problem|import):/, ""),
+      note: `${items} items held out from ${d.name}`,
+    })),
+  );
   const options: EngineInfo[] = [
     { id: "kenning", name: `Kenning (${status?.server.model ?? "offline"})`, available: !!status?.server.online, note: "the active model" },
     { id: "clef", name: "Cloudflare Clef (local)", available: !!clef.data?.online, note: clef.data?.online ? "~225 ms per item" : "docker compose --profile clef up -d clef" },
@@ -244,6 +253,21 @@ function RunCard({ engines, status }: { engines: EngineInfo[]; status: KenningSt
               </label>
             ))}
           </div>
+          {holdouts.length > 0 && (
+            <>
+              <div className="mb-1 mt-3 text-xs text-ink-3">Your problems (held out from your datasets, never trained on)</div>
+              <div className="grid gap-1">
+                {holdouts.map((s) => (
+                  <label key={s.id} className="flex items-start gap-2 text-[13px] text-ink-2">
+                    <input type="checkbox" className="mt-1" checked={suites.includes(s.id)} onChange={() => toggle(suites, setSuites, s.id)} />
+                    <span>
+                      {s.label} <span className="text-xs text-ink-3">{s.note}</span>
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </>
+          )}
         </div>
         <div>
           <div className="mb-1 text-xs text-ink-3">Engines</div>
