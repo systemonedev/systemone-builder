@@ -1,0 +1,13 @@
+{
+  "name": "support_thread",
+  "title": "Support thread next action",
+  "description": "Given a customer support conversation, decide whether it is resolved, whether to escalate, and the customer's mood.",
+  "writes": "a customer support conversation of 3-8 turns between a customer and one or more agents",
+  "state": {"fields": {"account": "the customer's plan and any relevant status, 1-2 lines", "thread": "the conversation, one turn per line, newest last"}},
+  "questions": [
+    {"id": "resolved", "ask": ["Is the customer's issue resolved?"], "labels": {"yes": "the customer's problem is solved and they are not waiting on anything", "no": "still open or the customer is waiting"}},
+    {"id": "escalate", "ask": ["Should this be escalated to a senior agent or manager?"], "labels": {"yes": "stuck, repeated contact, or an angry or high-value customer", "no": "a normal interaction the current agent can handle"}},
+    {"id": "mood", "ask": ["What is the customer's mood?"], "ordinal": true, "labels": {"happy": "", "neutral": "", "frustrated": "", "angry": ""}}
+  ],
+  "constraints": [{"if": {"resolved": "yes"}, "then": {"escalate": "no"}}]
+}
