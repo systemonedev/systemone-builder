@@ -144,3 +144,40 @@ def test_container_status_survives_a_replaced_image():
 
     info = DockerController(client=object())._info(Replaced())
     assert info.status == "running" and info.image == "systemone/student:latest" and info.gpus == [0]
+
+
+def test_recipe_validation_builds_every_stage(tmp_path):
+    # a clean recipe: derived names, deferred-input stages validated by parameters, recipe defaults
+    r = _validate("recipe", {"name": "v05x", "data": {"sources": ["nli"], "structured": 800},
+                             "train": {"epochs": 3}, "bench": {"suites": ["general", "multi"]}}, tmp_path)
+    assert r["model"] == "v05x" and r["dataset"] == "v05x-data" and r["labelled"] == "v05x-data-clef"
+    assert r["distill"] is True and r["alpha"] == 0.5
+    assert r["data"]["name"] == "v05x-data" and r["data"]["structured"] == 800
+    assert r["train"]["max_length"] == 1024 and r["train"]["epochs"] == 3.0  # recipe default ctx, overridden epochs
+    assert r["bench"]["suites"] == ["general", "multi"] and r["bench"]["engines"] == ["kenning", "clef"]
+    # the recipe's sub-params drive the existing stage command builders unchanged
+    (data_argv,) = kj.commands("data", r["data"], tmp_path, "")
+    assert "--structured" in data_argv and data_argv[data_argv.index("--out") + 1].endswith("v05x-data.jsonl")
+    (label_argv,) = kj.commands("label", {"dataset": r["dataset"], "name": r["labelled"], "alpha": 0.5,
+                                          "batch": 16, "limit": 0}, tmp_path, "http://clef")
+    assert label_argv[label_argv.index("--out") + 1].endswith("v05x-data-clef.jsonl")
+
+
+def test_recipe_rejects_bad_inputs(tmp_path):
+    (tmp_path / "models" / "taken").mkdir(parents=True)
+    for params, msg in [
+        ({"name": "taken"}, "already exists"),
+        ({"name": "r", "data": {"sources": ["nope"]}}, "subset"),
+        ({"name": "r", "data": {"problems": {"computer_use": 100}}}, "teacher"),  # problems need a teacher/pipeline
+        ({"name": "r", "bench": {"suites": ["nonsuite"]}}, "suites"),
+        ({"name": "r", "bench": {"engines": ["jev"]}}, "TYPESAFE_API_KEY"),
+        ({"name": "r", "train": {"base": "not a repo"}}, "Hugging Face"),
+    ]:
+        with pytest.raises(kj.JobError, match=msg):
+            _validate("recipe", params, tmp_path)
+    # distill:false is recorded; problems allowed when a teacher URL is given
+    r = _validate("recipe", {"name": "r2", "distill": False,
+                             "data": {"sources": [], "problems": {"computer_use": 50},
+                                      "teacher_url": "http://mac:11434/v1", "teacher_model": "qwen"}}, tmp_path)
+    assert r["distill"] is False and r["data"]["problems"] == {"computer_use": 50}
+    assert "recipe" in kj.KINDS

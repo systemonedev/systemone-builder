@@ -16,7 +16,7 @@ const STATUS: Record<string, "good" | "warning" | "serious" | "critical" | "neut
   interrupted: "serious",
 };
 
-const KIND: Record<JobKind, string> = { data: "Build data", label: "Label (Clef)", train: "Train", bench: "Benchmark" };
+const KIND: Record<JobKind, string> = { data: "Build data", label: "Label (Clef)", train: "Train", bench: "Benchmark", recipe: "Recipe (end-to-end)" };
 
 export function jobTitle(j: Job): string {
   const p = j.params;
