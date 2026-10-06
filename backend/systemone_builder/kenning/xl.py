@@ -115,7 +115,35 @@ class KenningXL:
         z = logits[ids].float()
         return z.tolist()
 
-    def system_one(self, req: SystemOneRequest) -> SystemOneResponse:
+    def _deliberate_readout(self, state_text: str, q: Question, options: list[str], pieces: list[str],
+                            max_new: int = 128) -> list[float]:
+        """Deliberate mode: let the model reason for a few tokens, then read the answer in that context.
+
+        Trades latency for computation on hard numeric/counting state. One greedy generation (no sampling,
+        so still deterministic), then the same constrained readout at the appended answer position.
+        """
+        import torch
+        instr = q.instructions.strip()
+        fmt = ("yes or no" if q.type == "noul" else "the letter" if q.type == "choice" else "the number")
+        reason_prompt = (f"{state_text}\n\nQuestion: {instr}\n"
+                         f"Work through it step by step in one or two short sentences, then stop.\nReasoning:")
+        enc = self.tokenizer(reason_prompt, return_tensors="pt", truncation=True,
+                             max_length=self.max_length - max_new - 16).to(self.model.device)
+        with torch.inference_mode():
+            gen = self.model.generate(**enc, max_new_tokens=max_new, do_sample=False,
+                                      pad_token_id=self.tokenizer.eos_token_id)
+        trace = self.tokenizer.decode(gen[0, enc["input_ids"].shape[1]:], skip_special_tokens=True).strip()
+        trace = trace.split("\n")[0][:400]  # keep it short, drop any runaway
+        if q.type == "choice":
+            lines = "\n".join(f"{CHOICE_LETTERS[i]}. {o}" for i, o in enumerate(options))
+            cue = f"\nOptions:\n{lines}\nAnswer with {fmt}.\nAnswer:"
+        elif q.type == "score":
+            cue = f"\nAnswer with {fmt} ({'; '.join(f'{i}={describe(lv)}' for i, lv in enumerate(options))}).\nAnswer:"
+        else:
+            cue = f"\nAnswer with {fmt}.\nAnswer:"
+        return self._readout(f"{reason_prompt} {trace}{cue}", pieces)
+
+    def system_one(self, req: SystemOneRequest, deliberate: bool = False) -> SystemOneResponse:
         import math
         import time
 
@@ -127,9 +155,10 @@ class KenningXL:
             for qid, q in req.questions.items():
                 options = (list(q.criteria) if q.type == "choice"
                            else [str(i) for i in range(len(q.criteria))] if q.type == "score" else ["yes", "no"])
-                prompt, pieces = _prompt(state_text, q, options if q.type == "choice" else
-                                         (q.criteria if q.type == "score" else []))
-                scores = self._readout(prompt, pieces)
+                legend = options if q.type == "choice" else (q.criteria if q.type == "score" else [])
+                prompt, pieces = _prompt(state_text, q, legend)
+                scores = (self._deliberate_readout(state_text, q, legend, pieces) if deliberate
+                          else self._readout(prompt, pieces))
                 t = self.temperature.get(q.type, 1.0)
                 m = max(s / t for s in scores)
                 probs = [math.exp(s / t - m) for s in scores]
