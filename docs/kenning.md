@@ -258,6 +258,46 @@ What it says:
 - Kenning answers about 4× faster. Clef's lead on records, tables, agent and logs is the case for the
   redesigned data (v0.5) and a longer-context model (Kenning-XL).
 
+### kenning-large-v0.6: Kenning-XL, a decoder with gold-trace deliberate reasoning (experimental)
+
+v0.5 showed the cross-encoder has a hard ceiling on decisions that need **computation over the state**
+(records, tables, logs): it scores each option in one pass over ≤512 tokens, with nowhere to add two
+numbers or scan a column. v0.6 changes the architecture. **Kenning-XL** (`kenning/xl.py`) is a small
+**decoder** (Qwen3-1.7B) that answers the same wire format by reading the next-token distribution over the
+answer tokens at one decision position — one pass, deterministic, temperature-calibrated, but the full LM
+now reasons over the whole 4k-token state. An optional **deliberate mode** generates a short reasoning
+trace first, then reads the answer.
+
+The decisive piece is **gold-trace training** (`kenning/traces.py`): because the rule generators *compute*
+each label, they emit the exact arithmetic/threshold/membership chain for free. Training Kenning-XL to
+reason-then-answer on those gold chains (`train_xl.py --deliberate`) teaches the computation itself — a
+stronger signal than any teacher's soft label for numeric decisions. It **transfers**: a model trained on
+chains from *different* record generators lifted the held-out arithmetic task over-daily-limit from 0.42
+(v0.5) to **0.81**, and table statements from 0.52 to 0.78.
+
+Deliberate reasoning helps threshold/arithmetic/table/policy tasks but *hurts* log-counting and a few
+others, so the v0.6 engine is a **two-tier cascade**: the Kenning reflex (v0.5) and one-pass Kenning-XL
+for the families they win, gold-trace deliberate Kenning-XL for records/tables.
+
+General suite, per-family mean (all columns same basis, 1,328 items):
+
+| family | v0.6 cascade | v0.5 | Clef-flash | Jev | handled by |
+|---|---|---|---|---|---|
+| **macro** | **0.720** | 0.653 | 0.791 | 0.830 | |
+| agent | **0.867** | 0.727 | 0.793 | 0.900 | XL one-pass |
+| conversation | 1.000 | 0.979 | 1.000 | 1.000 | XL one-pass |
+| quality | **0.479** | 0.479 | 0.447 | 0.498 | v0.5 reflex |
+| text | 0.778 | 0.756 | 0.841 | 0.834 | XL one-pass |
+| table | 0.740 | 0.520 | 0.860 | 0.940 | XL deliberate |
+| records | 0.654 | 0.587 | 0.857 | 0.921 | XL deliberate |
+| logs | 0.520 | 0.520 | 0.740 | 0.720 | v0.5 reflex |
+
+v0.6 **halves the macro gap to Clef** (−0.138 → −0.071), beats Clef on agent and answer-quality, ties
+conversation, and tables jump +0.22. It does **not** match Clef overall: records, tables, text and logs
+still trail. Honest next steps (`docs/kenning-xl-design.md`): gold counting-traces for logs and tables, a
+4B backbone, Kenning-XL as a served engine with the router, and a full single-engine cascade benchmark.
+Experimental, on branch `kenning-xl`; not published.
+
 ### kenning-large-v0.5: data redesigned for structured state
 
 v0.5 keeps the same 435M cross-encoder but is trained on data built for the families v0.4 was weakest
