@@ -53,6 +53,23 @@ def _answer_tokens(tok: Any, pieces: list[str]) -> list[int]:
     return ids
 
 
+def reason_prompt(state_text: str, q: Question) -> str:
+    """The prompt that elicits a short reasoning trace (shared by deliberate inference and training)."""
+    return (f"{state_text}\n\nQuestion: {q.instructions.strip()}\n"
+            f"Work through it step by step in one or two short sentences, then stop.\nReasoning:")
+
+
+def answer_cue(q: Question, options: list[str]) -> str:
+    """The text appended after the reasoning, ending at the answer-readout position."""
+    fmt = "yes or no" if q.type == "noul" else "the letter" if q.type == "choice" else "the number"
+    if q.type == "choice":
+        lines = "\n".join(f"{CHOICE_LETTERS[i]}. {o}" for i, o in enumerate(options))
+        return f"\nOptions:\n{lines}\nAnswer with {fmt}.\nAnswer:"
+    if q.type == "score":
+        return f"\nAnswer with {fmt} ({'; '.join(f'{i}={describe(lv)}' for i, lv in enumerate(options))}).\nAnswer:"
+    return f"\nAnswer with {fmt}.\nAnswer:"
+
+
 def _prompt(state_text: str, q: Question, options: list[str]) -> tuple[str, list[str]]:
     """The decision prompt and the answer surface forms to read logits over."""
     instr = q.instructions.strip()
@@ -123,25 +140,15 @@ class KenningXL:
         so still deterministic), then the same constrained readout at the appended answer position.
         """
         import torch
-        instr = q.instructions.strip()
-        fmt = ("yes or no" if q.type == "noul" else "the letter" if q.type == "choice" else "the number")
-        reason_prompt = (f"{state_text}\n\nQuestion: {instr}\n"
-                         f"Work through it step by step in one or two short sentences, then stop.\nReasoning:")
-        enc = self.tokenizer(reason_prompt, return_tensors="pt", truncation=True,
+        rp = reason_prompt(state_text, q)
+        enc = self.tokenizer(rp, return_tensors="pt", truncation=True,
                              max_length=self.max_length - max_new - 16).to(self.model.device)
         with torch.inference_mode():
             gen = self.model.generate(**enc, max_new_tokens=max_new, do_sample=False,
                                       pad_token_id=self.tokenizer.eos_token_id)
         trace = self.tokenizer.decode(gen[0, enc["input_ids"].shape[1]:], skip_special_tokens=True).strip()
         trace = trace.split("\n")[0][:400]  # keep it short, drop any runaway
-        if q.type == "choice":
-            lines = "\n".join(f"{CHOICE_LETTERS[i]}. {o}" for i, o in enumerate(options))
-            cue = f"\nOptions:\n{lines}\nAnswer with {fmt}.\nAnswer:"
-        elif q.type == "score":
-            cue = f"\nAnswer with {fmt} ({'; '.join(f'{i}={describe(lv)}' for i, lv in enumerate(options))}).\nAnswer:"
-        else:
-            cue = f"\nAnswer with {fmt}.\nAnswer:"
-        return self._readout(f"{reason_prompt} {trace}{cue}", pieces)
+        return self._readout(f"{rp} {trace}{answer_cue(q, options)}", pieces)
 
     def system_one(self, req: SystemOneRequest, deliberate: bool = False) -> SystemOneResponse:
         import math

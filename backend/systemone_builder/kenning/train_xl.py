@@ -21,8 +21,50 @@ from pathlib import Path
 from typing import Any
 
 from systemone_builder.kenning.model import make_deterministic
-from systemone_builder.kenning.xl import CONFIG_FILE, _answer_tokens, _prompt
+from systemone_builder.kenning.xl import CHOICE_LETTERS, CONFIG_FILE, _answer_tokens, _prompt, answer_cue, reason_prompt
 from systemone_builder.system_one.contract import Question
+
+
+def _gold_surface(q: Question, options: list[str], target: Any) -> str:
+    """The gold answer surface form for deliberate (CoT) training."""
+    if q.type == "noul":
+        return "yes" if (float(target) >= 0.5) else "no"
+    if q.type == "choice":
+        best = max(target, key=target.get) if isinstance(target, dict) else target
+        return CHOICE_LETTERS[options.index(best)]
+    return str(int(max(target, key=target.get)) if isinstance(target, dict) else int(target))
+
+
+def _deliberate_examples(path: Path, tok: Any, max_length: int) -> list[dict[str, Any]]:
+    """Causal-LM examples: reason_prompt (masked) then ' <trace><cue> <answer>' (supervised)."""
+    out = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        row = json.loads(line)
+        trace = row.get("trace")
+        if not trace:
+            continue
+        state = row["state"]
+        state_text = state if isinstance(state, str) else json.dumps(state, ensure_ascii=False, separators=(",", ": "))
+        for qid, target in row.get("targets", {}).items():
+            spec = row["questions"].get(qid)
+            if not spec:
+                continue
+            q = Question.model_validate(spec)
+            legend = (list(q.criteria) if q.type == "choice"
+                      else q.criteria if q.type == "score" else [])
+            options = list(q.criteria) if q.type == "choice" else (
+                [str(i) for i in range(len(q.criteria))] if q.type == "score" else ["yes", "no"])
+            rp = reason_prompt(state_text, q)
+            completion = f" {trace}{answer_cue(q, legend)} {_gold_surface(q, options, target)}"
+            prompt_ids = tok(rp, truncation=True, max_length=max_length)["input_ids"]
+            full_ids = tok(rp + completion, truncation=True, max_length=max_length)["input_ids"]
+            if len(full_ids) <= len(prompt_ids):
+                continue
+            labels = [-100] * len(prompt_ids) + full_ids[len(prompt_ids):]
+            out.append({"input_ids": full_ids, "labels": labels[:len(full_ids)]})
+    return out
 
 
 def target_probs(q: Question, options: list[str], target: Any) -> list[float]:
@@ -100,6 +142,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--lora-r", type=int, default=16)
     ap.add_argument("--val-fraction", type=float, default=0.05)
     ap.add_argument("--load-4bit", action="store_true")
+    ap.add_argument("--deliberate", action="store_true",
+                    help="train causal-LM on gold reasoning traces then the answer (rows need a 'trace' field)")
     ap.add_argument("--seed", type=int, default=13)
     a = ap.parse_args(argv)
     out = Path(a.out)
@@ -124,14 +168,18 @@ def main(argv: list[str] | None = None) -> int:
     model = get_peft_model(model, lora)
     model.print_trainable_parameters()
 
-    ex = _examples(Path(a.data), tok, a.max_length)
+    ex = (_deliberate_examples if a.deliberate else _examples)(Path(a.data), tok, a.max_length)
     random.Random(a.seed).shuffle(ex)
     n_val = max(50, int(len(ex) * a.val_fraction))
     val, train = ex[:n_val], ex[n_val:]
-    print(f"[xl-train] {len(ex)} readout examples: {len(train)} train / {len(val)} val", flush=True)
+    print(f"[xl-train] {len(ex)} {'deliberate' if a.deliberate else 'readout'} examples: "
+          f"{len(train)} train / {len(val)} val", flush=True)
 
     def forward_loss(e: dict[str, Any]) -> torch.Tensor:
         ids = torch.tensor([e["input_ids"]], device=model.device)
+        if a.deliberate:
+            labels = torch.tensor([e["labels"]], device=model.device)
+            return model(input_ids=ids, labels=labels).loss
         logits = model(input_ids=ids).logits[0, -1, :]
         z = logits[torch.tensor(e["ans_ids"], device=model.device)].float()
         logp = torch.log_softmax(z, dim=-1)
@@ -141,6 +189,9 @@ def main(argv: list[str] | None = None) -> int:
     @torch.inference_mode()
     def evaluate() -> tuple[float, list[tuple[str, list[float], list[float]]]]:
         model.eval()
+        if a.deliberate:  # readout accuracy isn't meaningful here; report mean val LM loss as "accuracy proxy"
+            losses = [forward_loss(e).item() for e in val]
+            return sum(losses) / len(losses), []
         hit = 0
         raw = []
         for e in val:
@@ -152,7 +203,7 @@ def main(argv: list[str] | None = None) -> int:
         return hit / len(val), raw
 
     acc0, _ = evaluate()
-    print(f"[xl-train] zero-shot val accuracy {acc0:.3f}", flush=True)
+    print(f"[xl-train] zero-shot val {'loss' if a.deliberate else 'accuracy'} {acc0:.3f}", flush=True)
 
     opt = torch.optim.AdamW([p for p in model.parameters() if p.requires_grad], lr=a.lr)
     steps = int(len(train) * a.epochs)
