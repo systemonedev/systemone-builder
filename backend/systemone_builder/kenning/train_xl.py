@@ -142,6 +142,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--lora-r", type=int, default=16)
     ap.add_argument("--val-fraction", type=float, default=0.05)
     ap.add_argument("--load-4bit", action="store_true")
+    ap.add_argument("--traces", help="gold-trace rows (with a trace field) to also train deliberate reason-then-answer on")
     ap.add_argument("--deliberate", action="store_true",
                     help="train causal-LM on gold reasoning traces then the answer (rows need a 'trace' field)")
     ap.add_argument("--seed", type=int, default=13)
@@ -168,39 +169,42 @@ def main(argv: list[str] | None = None) -> int:
     model = get_peft_model(model, lora)
     model.print_trainable_parameters()
 
-    ex = (_deliberate_examples if a.deliberate else _examples)(Path(a.data), tok, a.max_length)
+    # one model, both skills: readout distillation on all rows (--data) + deliberate causal-LM on gold
+    # traces (--traces). A mixed run trains the single servable engine; --deliberate trains traces only.
+    ex = [] if a.deliberate else _examples(Path(a.data), tok, a.max_length)
+    if a.traces or a.deliberate:
+        ex += _deliberate_examples(Path(a.traces or a.data), tok, a.max_length)
     random.Random(a.seed).shuffle(ex)
     n_val = max(50, int(len(ex) * a.val_fraction))
     val, train = ex[:n_val], ex[n_val:]
-    print(f"[xl-train] {len(ex)} {'deliberate' if a.deliberate else 'readout'} examples: "
+    n_read = sum("ans_ids" in e for e in ex)
+    print(f"[xl-train] {len(ex)} examples ({n_read} readout + {len(ex) - n_read} deliberate): "
           f"{len(train)} train / {len(val)} val", flush=True)
 
     def forward_loss(e: dict[str, Any]) -> torch.Tensor:
         ids = torch.tensor([e["input_ids"]], device=model.device)
-        if a.deliberate:
-            labels = torch.tensor([e["labels"]], device=model.device)
-            return model(input_ids=ids, labels=labels).loss
-        logits = model(input_ids=ids).logits[0, -1, :]
+        if "labels" in e:  # deliberate: causal-LM on the reasoning + answer
+            return model(input_ids=ids, labels=torch.tensor([e["labels"]], device=model.device)).loss
+        logits = model(input_ids=ids).logits[0, -1, :]  # readout: KL on the answer tokens
         z = logits[torch.tensor(e["ans_ids"], device=model.device)].float()
-        logp = torch.log_softmax(z, dim=-1)
         y = torch.tensor(e["target"], device=model.device, dtype=torch.float32)
-        return -(y * logp).sum()
+        return -(y * torch.log_softmax(z, dim=-1)).sum()
 
     @torch.inference_mode()
     def evaluate() -> tuple[float, list[tuple[str, list[float], list[float]]]]:
         model.eval()
-        if a.deliberate:  # readout accuracy isn't meaningful here; report mean val LM loss as "accuracy proxy"
-            losses = [forward_loss(e).item() for e in val]
-            return sum(losses) / len(losses), []
+        read = [e for e in val if "ans_ids" in e]
+        if not read:  # deliberate-only run: report mean val LM loss
+            return sum(forward_loss(e).item() for e in val) / len(val), []
         hit = 0
         raw = []
-        for e in val:
+        for e in read:
             ids = torch.tensor([e["input_ids"]], device=model.device)
             z = model(input_ids=ids).logits[0, -1, :][torch.tensor(e["ans_ids"], device=model.device)].float().tolist()
             raw.append((e["type"], z, e["target"]))
             if max(range(len(z)), key=z.__getitem__) == max(range(len(e["target"])), key=e["target"].__getitem__):
                 hit += 1
-        return hit / len(val), raw
+        return hit / len(read), raw
 
     acc0, _ = evaluate()
     print(f"[xl-train] zero-shot val {'loss' if a.deliberate else 'accuracy'} {acc0:.3f}", flush=True)

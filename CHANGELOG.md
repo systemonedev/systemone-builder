@@ -30,7 +30,7 @@ General suite, per-family mean (same basis for all columns):
 
 | | v0.6 cascade | v0.5 | Clef | Jev |
 |---|---|---|---|---|
-| **macro** | **0.720** | 0.653 | 0.791 | 0.830 |
+| **macro (as served)** | **0.688** | 0.653 | 0.791 | 0.830 |
 | agent | **0.867** | 0.727 | 0.793 | 0.900 |
 | conversation | 1.000 | 0.979 | 1.000 | 1.000 |
 | quality | **0.479** | 0.479 | 0.447 | 0.498 |
@@ -39,8 +39,10 @@ General suite, per-family mean (same basis for all columns):
 | records | 0.654 | 0.587 | 0.857 | 0.921 |
 | logs | 0.520 | 0.520 | 0.740 | 0.720 |
 
-- Halves the macro gap to Clef (v0.5 −0.138 → v0.6 −0.071); **beats Clef on agent and answer-quality**,
-  ties conversation; tables +0.22 from deliberate reasoning.
+- Served as one engine (`kenning/xl_serve.py`) with confidence- and size-gated deliberate escalation:
+  **macro 0.688** (v0.5 0.653), **beats Clef on agent** (0.860), ties conversation, lifts records
+  (0.587→0.663) and tables (0.520→0.660). A per-family *oracle* router reaches 0.720 — the ceiling a
+  smarter policy and log/table counting-traces would approach.
 - **Gold-trace training works and transfers:** trained on reasoning chains the rule generators compute for
   free (`kenning/traces.py`), the held-out arithmetic task over-daily-limit went 0.42 → **0.81**.
 - Honest limits: still behind Clef on records, tables, text and logs. Deliberate mode *hurts* log-counting

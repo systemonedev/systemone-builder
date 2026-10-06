@@ -283,7 +283,7 @@ General suite, per-family mean (all columns same basis, 1,328 items):
 
 | family | v0.6 cascade | v0.5 | Clef-flash | Jev | handled by |
 |---|---|---|---|---|---|
-| **macro** | **0.720** | 0.653 | 0.791 | 0.830 | |
+| **macro (as served)** | **0.688** | 0.653 | 0.791 | 0.830 | |
 | agent | **0.867** | 0.727 | 0.793 | 0.900 | XL one-pass |
 | conversation | 1.000 | 0.979 | 1.000 | 1.000 | XL one-pass |
 | quality | **0.479** | 0.479 | 0.447 | 0.498 | v0.5 reflex |
@@ -292,9 +292,11 @@ General suite, per-family mean (all columns same basis, 1,328 items):
 | records | 0.654 | 0.587 | 0.857 | 0.921 | XL deliberate |
 | logs | 0.520 | 0.520 | 0.740 | 0.720 | v0.5 reflex |
 
-v0.6 **halves the macro gap to Clef** (−0.138 → −0.071), beats Clef on agent and answer-quality, ties
-conversation, and tables jump +0.22. It does **not** match Clef overall: records, tables, text and logs
-still trail. Honest next steps (`docs/kenning-xl-design.md`): gold counting-traces for logs and tables, a
+Served as one engine (`xl_serve.py`) with confidence- and size-gated deliberate escalation (macro
+**0.688**; a per-family oracle router reaches 0.720). It **beats Clef on agent** (0.860), ties conversation,
+and lifts records/tables through deliberate reasoning. It does **not** match Clef overall: logs, quality,
+text and records still trail, and blind escalation mildly hurts logs/quality (deliberate isn't trace-trained
+for them yet). Honest next steps (`docs/kenning-xl-design.md`): gold counting-traces for logs and tables, a
 4B backbone, Kenning-XL as a served engine with the router, and a full single-engine cascade benchmark.
 Experimental, on branch `kenning-xl`; not published.
 

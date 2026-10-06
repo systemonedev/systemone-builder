@@ -1,0 +1,38 @@
+{
+  "name": "context_relevance",
+  "title": "Context compaction: keep, summarize, or drop",
+  "description": "For a coding/agent session near its context limit, decide what to do with each chunk of prior context given the current goal: keep it, how important it is, its role, and whether its exact text must be preserved.",
+  "writes": "one chunk of an AI coding agent's session context paired with the task it is currently working on. The chunk is one of: a tool/command output, a file or diff excerpt, a user message, an assistant message, an error/stack trace, or a plan. Make the chunk concrete (real-looking code, paths, commands, or prose) and vary how related it is to the goal.",
+  "state": {
+    "fields": {
+      "current_goal": "what the agent is working on right now, 1-2 sentences",
+      "chunk": "the one piece of prior context being judged: its kind and its content (5-20 short lines)"
+    }
+  },
+  "questions": [
+    {"id": "keep",
+     "ask": ["Should this chunk be kept in context for the current goal?", "Is this chunk still worth its tokens?"],
+     "labels": {"yes": "needed or useful for what the agent is doing now", "no": "can be dropped without hurting the current goal"}},
+    {"id": "priority",
+     "ask": ["How important is it to retain this chunk?"],
+     "ordinal": true,
+     "labels": {"low": "marginal; evict first under pressure", "medium": "useful background", "high": "central to the current goal; losing it would break the work"}},
+    {"id": "role",
+     "ask": ["What is this chunk's role relative to the current goal?"],
+     "labels": {"active_work": "directly part of what is being done now",
+                "reference": "background or an earlier result that may be needed again",
+                "stale": "finished or obsolete; the work it belonged to is done",
+                "superseded": "replaced by newer information in the session"}},
+    {"id": "handling",
+     "ask": ["How should this chunk be compacted?"],
+     "labels": {"verbatim": "exact text matters: code, commands, IDs, paths, error messages, numbers",
+                "summarize": "the gist is enough; details can be dropped",
+                "drop": "not needed at all"}}
+  ],
+  "constraints": [
+    {"if": {"keep": "no"}, "then": {"handling": "drop", "priority": "low", "role": ["stale", "superseded"]}},
+    {"if": {"role": "active_work"}, "then": {"keep": "yes", "priority": "high"}},
+    {"if": {"handling": "verbatim"}, "then": {"keep": "yes"}},
+    {"if": {"handling": "drop"}, "then": {"keep": "no"}}
+  ]
+}
