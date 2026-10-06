@@ -64,13 +64,14 @@ class Problem:
                 return False
         return True
 
-    def draw(self, rng: random.Random) -> dict[str, str]:
-        """Random labels that satisfy the constraints."""
-        for _ in range(200):
-            labels = {a.name: rng.choice(list(a.labels)) for a in self.attrs}
+    def draw(self, rng: random.Random, fix: dict[str, str] | None = None) -> dict[str, str]:
+        """Random labels that satisfy the constraints; ``fix`` pins some questions' answers."""
+        for _ in range(400):
+            labels = {a.name: fix[a.name] if fix and a.name in fix else rng.choice(list(a.labels)) for a in self.attrs}
             if self.allows(labels):
                 return labels
-        raise ValueError(f"{self.name}: the constraints rule out (almost) every combination of labels")
+        raise ValueError(f"{self.name}: the constraints rule out (almost) every combination of labels"
+                         + (f" with {fix}" if fix else ""))
 
     def summary(self) -> dict[str, Any]:
         return {"name": self.name, "title": self.title, "description": self.description,
@@ -212,15 +213,22 @@ async def _chat(client: httpx.AsyncClient, model: str, prompt: str, schema: dict
 
 async def write_cases(p: Problem, n: int, seed: int, base_url: str, model: str, api_key: str | None = None,
                       concurrency: int = 16, max_tokens: int = 700, check: bool = True,
-                      stats: dict[str, int] | None = None, extra: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+                      stats: dict[str, int] | None = None, extra: dict[str, Any] | None = None,
+                      balance: bool = False) -> list[dict[str, Any]]:
     """Up to n distinct label-conditioned cases ({"state", "labels"}) written by an OpenAI-compatible teacher.
 
     With check, the teacher then answers the questions about each case without seeing the intended
     labels, and a case is kept only when every answer matches (a blind agreement filter). ``extra`` is
     added to every request body, e.g. ``{"reasoning_effort": "none"}`` to turn off a reasoning model's
-    thinking on servers that support it.
+    thinking on servers that support it. ``balance`` draws the first question's answers uniformly (so a
+    decision like keep/drop isn't dominated by one class the constraints make common).
     """
     rng = random.Random(f"problem-{p.name}-{seed}")
+    primary = p.attrs[0].name
+    primary_vals = list(p.attrs[0].labels)
+
+    def _draw() -> dict[str, str]:
+        return p.draw(rng, {primary: rng.choice(primary_vals)}) if balance else p.draw(rng)
     sem = asyncio.Semaphore(concurrency)
     headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
     schema = _schema(p)
@@ -257,7 +265,7 @@ async def write_cases(p: Problem, n: int, seed: int, base_url: str, model: str, 
         while len(cases) < n and counts["asked"] < max_attempts:
             rate = max(counts["kept"] / counts["asked"], 0.2) if counts["asked"] else 1.0
             batch = min(math.ceil((n - len(cases)) / rate * 1.1), max_attempts - counts["asked"])
-            jobs = [(p.draw(rng), rng.choice(p.styles)) for _ in range(batch)]
+            jobs = [(_draw(), rng.choice(p.styles)) for _ in range(batch)]
             start = counts["asked"]
             out = await asyncio.gather(*(one(client, start + j, *job) for j, job in enumerate(jobs)))
             for x in out:

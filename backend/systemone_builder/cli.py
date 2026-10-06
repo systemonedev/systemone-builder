@@ -155,7 +155,8 @@ async def synthetic_task_rows(s, datasets, per_task: int, seed: int):  # noqa: A
 
 
 async def problem_rows(s, datasets, ref: str, n: int, seed: int, holdout: float, teacher_url: str | None,  # noqa: ANN001
-                       teacher_model: str | None, check: bool, no_think: bool = False, concurrency: int = 16):  # noqa: ANN201
+                       teacher_model: str | None, check: bool, no_think: bool = False, concurrency: int = 16,
+                       balance: bool = False):  # noqa: ANN201
     """Teacher-written rows for a problem spec, plus its held-out benchmark items (cases cached in datasets/)."""
     import re
 
@@ -171,7 +172,7 @@ async def problem_rows(s, datasets, ref: str, n: int, seed: int, holdout: float,
         t = resolve(s)["triage"]
         url, model, key = t.url, teacher_model or t.model, t.api_key()
     tag = re.sub(r"[^a-z0-9.]+", "-", model.lower()).strip("-")[:40]
-    cache = datasets / f"problem-{prob.name}-n{n}-seed{seed}-{tag}{'' if check else '-unchecked'}.jsonl"
+    cache = datasets / f"problem-{prob.name}-n{n}-seed{seed}-{tag}{'' if check else '-unchecked'}{'-bal' if balance else ''}.jsonl"
     if cache.exists():
         cases = [json.loads(x) for x in cache.read_text(encoding="utf-8").splitlines() if x.strip()]
         print(f"[kenning-data] reusing {len(cases)} {prob.name} cases from {cache}")
@@ -180,7 +181,8 @@ async def problem_rows(s, datasets, ref: str, n: int, seed: int, holdout: float,
         print(f"[kenning-data] asking {model} for {n} {prob.name} cases"
               f"{' (each checked blind by the teacher)' if check else ''} ...", flush=True)
         cases = await problems.write_cases(prob, n, seed, url, model, key, concurrency=concurrency, check=check,
-                                           stats=stats, extra={"reasoning_effort": "none"} if no_think else None)
+                                           stats=stats, extra={"reasoning_effort": "none"} if no_think else None,
+                                           balance=balance)
         print(f"[kenning-data] {prob.name}: {stats.get('asked', 0)} asked, {stats.get('written', 0)} written, "
               f"{stats.get('disagreed', 0)} failed the blind check, {len(cases)} kept", flush=True)
         if len(cases) < n:
@@ -250,7 +252,7 @@ def cmd_data(a: argparse.Namespace) -> int:
                 ref, _, n = spec.partition("=")
                 prow, meta, hold = await problem_rows(s, datasets, ref, int(n or 500), a.seed, a.holdout,
                                                       a.teacher_url, a.teacher_model, not a.no_check,
-                                                      a.teacher_no_think, a.teacher_concurrency)
+                                                      a.teacher_no_think, a.teacher_concurrency, a.balance_problems)
                 key = f"problem:{Path(ref).stem}"
                 extra[key] = (prow, meta)
                 if hold:
@@ -548,6 +550,8 @@ def main(argv: list[str] | None = None) -> int:
     d.add_argument("--teacher-url", help="OpenAI-compatible base URL of the teacher that writes problem cases "
                                          "(default: the triage model); key in S1_TEACHER_API_KEY if it needs one")
     d.add_argument("--teacher-model", help="teacher model name (required with --teacher-url)")
+    d.add_argument("--balance-problems", action="store_true",
+                   help="draw each problem's first question uniformly (balance e.g. keep/drop)")
     d.add_argument("--teacher-no-think", action="store_true",
                    help="send reasoning_effort=none, turning off a reasoning teacher's thinking (Ollama, recent vLLM)")
     d.add_argument("--teacher-concurrency", type=int, default=16, help="parallel teacher requests")
