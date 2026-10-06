@@ -46,13 +46,32 @@ def model() -> KenningXL:
     return _model
 
 
+def escalate_max_tokens() -> int:
+    """Deliberate reasoning helps short, structured state (records, tables) but not long log-counting, so
+    only escalate when the state fits under this many tokens. 0 = no size limit."""
+    try:
+        return int(os.environ.get("S1_XL_ESCALATE_MAX_TOKENS", "900"))
+    except ValueError:
+        return 900
+
+
 def answer(req: SystemOneRequest) -> SystemOneResponse:
-    """One-pass, then re-answer the low-confidence questions in deliberate mode."""
+    """One-pass, then re-answer the low-confidence questions in deliberate mode.
+
+    Escalation is gated by confidence (``S1_XL_ESCALATE``) and by state size
+    (``S1_XL_ESCALATE_MAX_TOKENS``): long states (e.g. logs) stay one-pass, where the model does better.
+    """
+    from systemone_builder.kenning.xl import render_state
     m = model()
     resp = m.system_one(req)
     thr = escalate_threshold()
+    if thr <= 0:
+        return resp
+    max_tok = escalate_max_tokens()
+    if max_tok and len(m.tokenizer(render_state(req.state))["input_ids"]) > max_tok:
+        return resp  # too long to benefit from deliberate reasoning
     unsure = [q for q, a in resp.answers.items() if _confidence(a) < thr]
-    if thr > 0 and unsure:
+    if unsure:
         deep = m.system_one(SystemOneRequest(state=req.state, questions={q: req.questions[q] for q in unsure}),
                             deliberate=True)
         resp.answers.update(deep.answers)

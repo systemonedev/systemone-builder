@@ -63,6 +63,7 @@ def test_server_escalates_only_unsure_questions(monkeypatch):
         name = "stub-xl"
         max_length = 4096
         temperature = {"noul": 1.0}
+        tokenizer = staticmethod(lambda s: {"input_ids": s.split()})  # ~word count, for the size gate
 
         def system_one(self, req, deliberate=False):
             if deliberate:
@@ -81,6 +82,13 @@ def test_server_escalates_only_unsure_questions(monkeypatch):
     resp = xl_serve.answer(req)
     assert calls["onepass"] == 1 and calls["deliberate"] == [["unsure"]]  # only the unsure one re-run
     assert resp.answers["sure"].noul == 0.95 and resp.answers["unsure"].noul == 0.99  # deliberate result kept
+
+    # long state is not escalated (deliberate doesn't help log-counting)
+    calls["deliberate"].clear()
+    monkeypatch.setenv("S1_XL_ESCALATE_MAX_TOKENS", "5")
+    long_req = SimpleNamespace(state="a b c d e f g h i j", questions=req.questions)
+    xl_serve.answer(long_req)
+    assert calls["deliberate"] == []
 
     # threshold 0 = never escalate
     calls["deliberate"].clear()
