@@ -7,7 +7,7 @@ from systemone_builder.adapters.factory import build_adapter
 from systemone_builder.config import Settings
 from systemone_builder.system_one.engines import JevEngine, LLMJsonEngine, LocalLogprobEngine, SystemOneEngine
 
-ENGINES = ("kenning", "clef", "jev", "local", "llm")
+ENGINES = ("kenning", "clef", "jev", "glide", "local", "llm")
 
 
 def build_engine(kind: str, s: Settings) -> SystemOneEngine:
@@ -27,6 +27,10 @@ def build_engine(kind: str, s: Settings) -> SystemOneEngine:
         # Opt-in: TypeSafe Jev with the user's own TYPESAFE_API_KEY (their TypeSafe agreement applies).
         return JevEngine(s.typesafe_api_key, base_url=s.typesafe_url, model=s.typesafe_model,
                          timeout_s=s.request_timeout_s)
+    if kind == "glide":
+        # Opt-in: Fastino GLiDE with the user's own FASTINO_API_KEY. Same wire format; benchmark only.
+        return JevEngine(s.fastino_api_key, base_url=s.fastino_url, model=s.fastino_model,
+                         timeout_s=max(s.request_timeout_s, 60), name="glide")
     if kind == "llm":
         o = resolve(s)["oracle"]
         return LLMJsonEngine(build_adapter(o.adapter, o.url, o.model, s.oracle_timeout_s, o.api_key()))

@@ -512,7 +512,7 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--questions", help="questions JSON for a JSONL suite ({qid: {type, instructions, criteria}})")
     b.add_argument("--gate", help="noul question used for automation metrics (default: first noul)")
     b.add_argument("--engines", default="kenning,local",
-                   help="comma-separated: kenning, local, llm (slow), jev (opt-in: needs TYPESAFE_API_KEY; your TypeSafe agreement applies)")
+                   help="comma-separated: kenning, clef, local, llm (slow), jev (opt-in: needs TYPESAFE_API_KEY), glide (opt-in: needs FASTINO_API_KEY). Hosted engines run under your own agreement and are never trained on.")
     b.add_argument("-n", type=int, default=50, help="items to sample for the built-in suite")
     b.add_argument("--seed", type=int, default=42)
     b.add_argument("--concurrency", type=int, default=8)

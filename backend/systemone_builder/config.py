@@ -122,6 +122,12 @@ class Settings(BaseSettings):
     typesafe_url: str = "https://api.typesafe.ai"
     typesafe_model: str = "jev-latest"
     typesafe_api_key: str | None = Field(default=None, validation_alias=AliasChoices("TYPESAFE_API_KEY", "S1_TYPESAFE_API_KEY"))
+    # Fastino GLiDE, a hosted System One model speaking the same wire format
+    # (model "fastino/GLiDE"). Benchmark engine only, never trained on. Key name
+    # is FASTINO_API_KEY (what Fastino's docs use, no S1_ prefix).
+    fastino_url: str = "https://api.fastino.ai"
+    fastino_model: str = "fastino/GLiDE"
+    fastino_api_key: str | None = Field(default=None, validation_alias=AliasChoices("FASTINO_API_KEY", "S1_FASTINO_API_KEY"))
 
     # -------------------------------------------------------------- routing
     default_threshold: float = 0.80
