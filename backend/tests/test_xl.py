@@ -13,7 +13,7 @@ from systemone_builder.system_one.contract import Question
 # ------------------------------------------------------------------ traces
 def test_every_record_family_emits_a_consistent_trace():
     from systemone_builder.kenning import structured as st
-    for kind in traces.RECORD_FAMILIES:
+    for kind in traces.TRACE_FAMILIES:
         for state, _attrs, labels in st.cases(kind, 40, 2):
             t = traces.trace_for(kind, state, labels)
             assert t and len(t) > 15 and ("->" in t or "<" in t or ">" in t), (kind, t)
