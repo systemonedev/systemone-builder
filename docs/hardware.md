@@ -42,7 +42,7 @@ Reference: Windows 11, 192 GB RAM, `.wslconfig` `memory=160GB`, 2x RTX 3090.
    API over the compose network and adds `S1_API_KEY` itself (the key never reaches the
    browser). On loopback no sign-in is needed; on a LAN bind the dashboard asks for the key
    once and keeps an HttpOnly session cookie.
-3. **GPU isolation.** The vLLM services use the same pattern as the mindoril stacks, which run
+3. **GPU isolation.** The vLLM services use the same pattern as a known-stable local vLLM setup, which run
    stably on this machine: `device_ids`, `NVIDIA_VISIBLE_DEVICES` and `CUDA_VISIBLE_DEVICES` all
    set to the same index (student 0, triage 1; PCI bus order). Docker Desktop exposes every GPU
    to every container, so `CUDA_VISIBLE_DEVICES` does the real pinning. On native Linux only the
@@ -53,13 +53,13 @@ Reference: Windows 11, 192 GB RAM, `.wslconfig` `memory=160GB`, 2x RTX 3090.
    restart loop.
 5. **Memory.** `mem_limit` applies to redis (40g), api (4g), dashboard (1g) and the trainer
    (48g, private 8g `/dev/shm`), each overridable with `S1_*_MEM_LIMIT`. Redis `maxmemory` is
-   32gb. Like mindoril's, the vLLM containers have no `mem_limit` and no `ipc: host`. CPU KV
+   32gb. Like our reference setup's, the vLLM containers have no `mem_limit` and no `ipc: host`. CPU KV
    offload is **0 by default on WSL2**. Without `ipc: host` a container's `/dev/shm` is only
    64 MB, so using offload would also need a `shm_size` on that service.
-6. **WSL2: no pinned memory, V1 runner, mindoril-style triage.** Under WSL2 both vLLM
+6. **WSL2: no pinned memory, V1 runner, reference-style triage.** Under WSL2 both vLLM
    servers run without pinned host memory and with the V1 model runner (see "Pinned memory
    stays off" below); the log line `pinned memory off` confirms it. Triage starts with the
-   same flags as mindoril: `--dtype half --max-num-seqs 3 --enable-chunked-prefill`
+   same flags as our reference setup: `--dtype half --max-num-seqs 3 --enable-chunked-prefill`
    (`S1_TRIAGE_MAX_NUM_SEQS` to change). `S1_TRIAGE_SAFE_MODE=1` / `S1_STUDENT_SAFE_MODE=1`
    add `--enforce-eager`. The API waits for triage to *start*, not to be healthy, so a
    failing triage doesn't keep the dashboard down.

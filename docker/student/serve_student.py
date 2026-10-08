@@ -272,7 +272,7 @@ def main() -> None:
     ]
     # (flag, value or None) - each dropped if this vLLM does not know it
     if ROLE == "triage":
-        # Same launch as the mindoril vLLM servers, which run AWQ models on this
+        # Same launch as the reference vLLM servers, which run AWQ models on this
         # machine's GPU 1 without trouble: few sequences, chunked prefill, fp16.
         optional: list[tuple[str, str | None]] = [
             ("--dtype", env("S1_DTYPE", "half")),
