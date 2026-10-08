@@ -381,7 +381,8 @@ def format_reports(suite: Suite, reports: list[dict[str, Any]]) -> str:
         row("MACRO ACCURACY (tasks)", [_f(r.get("macro_accuracy")) for r in reports])
         for fam in sorted({f for r in reports for f in (r.get("family_accuracy") or {})}):
             row(f"  family: {fam}", [_f((r.get("family_accuracy") or {}).get(fam)) for r in reports])
-    for qid, q in suite.questions.items():
+    per_question = suite.questions.items() if len(suite.questions) <= 60 else []  # skip for many-question suites (e.g. workflowevals)
+    for qid, q in per_question:
         m = [r["questions"][qid] for r in reports]
         lines.append(f"[{qid}] ({q.type})")
         if q.type == "noul":
@@ -435,6 +436,9 @@ async def run_benchmark(suite: Suite, engines: list[SystemOneEngine], *, concurr
             if suite.name == "general":
                 from systemone_builder.system_one.general_suite import family_averages
                 report["family_accuracy"] = family_averages(report)
+            elif suite.name == "workflowevals":
+                from systemone_builder.system_one.workflowevals_suite import workflow_averages
+                report["family_accuracy"] = workflow_averages(report)
         out.reports.append(report)
         out.raw[engine.name] = results
     return out
