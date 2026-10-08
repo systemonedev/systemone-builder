@@ -157,7 +157,7 @@ services:
     env_file: [{ path: .env, required: false }]
     environment:
       S1_STUDENT_BASE_MODEL: ${S1_STUDENT_BASE_MODEL:-Qwen/Qwen2.5-1.5B-Instruct}
-      # GPU selection follows the mindoril stacks that run stably on this
+      # GPU selection follows a known-stable local vLLM setup on this
       # machine: device_ids + NVIDIA_VISIBLE_DEVICES + CUDA_VISIBLE_DEVICES, all
       # the same index. Docker Desktop (WSL2) exposes every GPU, so
       # CUDA_VISIBLE_DEVICES does the real pinning. On native Linux only the
@@ -177,7 +177,7 @@ services:
       - ${S1_WORKSPACE_VOLUME:-systemone-workspace}:/workspace
     ports:
       - "127.0.0.1:${S1_STUDENT_PORT:-8091}:8000"   # raw vLLM, no auth: host-local only
-    # No ipc: host and no mem_limit, as in the mindoril vLLM services.
+    # No ipc: host and no mem_limit, as in the reference vLLM services.
     stop_signal: SIGTERM
     stop_grace_period: 120s
     deploy:
@@ -296,9 +296,9 @@ services:
       S1_MAX_MODEL_LEN: ${S1_TRIAGE_MAX_MODEL_LEN:-16384}
       S1_KV_OFFLOAD_GB: ${S1_TRIAGE_KV_OFFLOAD_GB:-}
       S1_VLLM_EXTRA_ARGS: ${S1_TRIAGE_VLLM_EXTRA_ARGS:-}
-      # 1 = --enforce-eager; unset = off (mindoril runs without it)
+      # 1 = --enforce-eager; unset = off (the reference setup runs without it)
       S1_VLLM_SAFE_MODE: ${S1_TRIAGE_SAFE_MODE:-}
-      # launcher defaults for triage match mindoril: --dtype half,
+      # launcher defaults for triage match our reference setup: --dtype half,
       # --max-num-seqs 3, --enable-chunked-prefill
       S1_MAX_NUM_SEQS: ${S1_TRIAGE_MAX_NUM_SEQS:-}
       HF_HOME: /workspace/hf_cache
@@ -310,7 +310,7 @@ services:
       - ${S1_WORKSPACE_VOLUME:-systemone-workspace}:/workspace
     ports:
       - "127.0.0.1:${S1_TRIAGE_PORT:-8092}:8000"    # raw vLLM, no auth: host-local only
-    # No ipc: host and no mem_limit, as in the mindoril vLLM services.
+    # No ipc: host and no mem_limit, as in the reference vLLM services.
     stop_signal: SIGTERM
     stop_grace_period: 120s
     deploy:
