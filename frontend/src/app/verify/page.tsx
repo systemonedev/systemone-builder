@@ -222,6 +222,8 @@ function RunCard({ engines, status }: { engines: EngineInfo[]; status: KenningSt
   const [paid, setPaid] = useState(false);
   const clef = usePoll<{ online: boolean }>("/kenning/clef", 15000);
   const datasets = usePoll<Dataset[]>("/kenning/datasets", 30000);
+  const jobs = usePoll<{ busy: boolean }>("/kenning/jobs", 4000);
+  const busy = !!jobs.data?.busy; // a train or benchmark is already running (one job at a time)
   // problems and imports held out when their dataset was built: benchmark the model on your own problem
   const holdouts = (datasets.data ?? []).flatMap((d) =>
     Object.entries(d.holdouts ?? {}).map(([key, items]) => ({
@@ -241,6 +243,19 @@ function RunCard({ engines, status }: { engines: EngineInfo[]; status: KenningSt
   return (
     <Card title="Run a benchmark">
       <div className="space-y-3">
+        <div className="flex items-center justify-between gap-2 rounded-md border border-line bg-surface-2 px-3 py-2 text-[13px]">
+          <span>
+            <span className="text-ink-3">Loaded model (will be benchmarked): </span>
+            {status?.server.online ? (
+              <span className="font-medium text-ink">{status.server.model}</span>
+            ) : (
+              <span style={{ color: "var(--warning)" }}>Kenning offline</span>
+            )}
+          </span>
+          <a href="/models" className="shrink-0 text-xs text-accent underline">
+            change on Models
+          </a>
+        </div>
         <div>
           <div className="mb-1 text-xs text-ink-3">Suites</div>
           <div className="grid gap-1">
@@ -294,17 +309,18 @@ function RunCard({ engines, status }: { engines: EngineInfo[]; status: KenningSt
           </Field>
           <Button
             variant="primary"
-            disabled={!suites.length || !picked.length || (jev && !paid)}
+            disabled={!suites.length || !picked.length || (jev && !paid) || busy}
             onClick={async () => {
               try {
                 await api("/kenning/jobs", { method: "POST", json: { kind: "bench", params: { suites, engines: picked, n, confirm_paid: jev && paid } } });
                 notify("Benchmark started", "info");
+                jobs.reload();
               } catch (e: any) {
                 notify(e.message, "error");
               }
             }}
           >
-            Run
+            {busy ? "Running…" : "Run"}
           </Button>
         </div>
         <p className="text-xs text-ink-3">

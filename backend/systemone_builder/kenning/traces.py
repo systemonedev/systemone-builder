@@ -110,10 +110,93 @@ def trace_subscription(s: dict[str, Any], labels: dict[str, str]) -> str:
             f"{'charged to the paid plan' if acc['card_on_file'] and not acc['cancellation_requested'] else 'downgraded to free'}.")
 
 
+def trace_access_log(s: dict[str, Any], labels: dict[str, str]) -> str:
+    import re
+    thr = int(re.search(r"more than (\d+)%", s["rules"])[1])
+    lines = s["access_log"].splitlines()
+    parsed = [m.groups() for ln in lines if (m := re.match(r'(\S+) .*"GET (\S+) HTTP/1\.1" (\d+)', ln))]
+    total = len(parsed)
+    n5 = sum(int(code) >= 500 for _, _, code in parsed)
+    fails: dict[str, int] = {}
+    logins: dict[str, int] = {}
+    for ip, ep, code in parsed:
+        if int(code) >= 500:
+            fails[ep] = fails.get(ep, 0) + 1
+        if ep == "/api/login" and code == "401":
+            logins[ip] = logins.get(ip, 0) + 1
+    rate = 100 * n5 / total if total else 0
+    parts = [f"{total} requests, {n5} with 5xx = {rate:.0f}%; threshold {thr}% -> "
+             f"{'alert' if rate > thr else 'no alert'}."]
+    worst_ip = max(logins, key=logins.get) if logins else None
+    parts.append(f"Most failed logins from one IP: {logins.get(worst_ip, 0) if worst_ip else 0} (need 5) -> "
+                 f"{'brute force' if any(v >= 5 for v in logins.values()) else 'no brute force'}.")
+    if "worst_endpoint" in labels and fails:
+        parts.append(f"5xx by endpoint { {k: v for k, v in sorted(fails.items(), key=lambda x: -x[1])} } -> "
+                     f"worst {max(fails, key=fails.get)}.")
+    return " ".join(parts)
+
+
+def trace_deploy_log(s: dict[str, Any], labels: dict[str, str]) -> str:
+    events = [json.loads(x) for x in s["log"].splitlines() if x.strip()]
+    at = next(i for i, e in enumerate(events) if str(e.get("msg", "")).startswith("deploy"))
+    before = sum(e.get("level") == "error" for e in events[:at])
+    after = sum(e.get("level") == "error" for e in events[at + 1:])
+    return (f"Errors before the deploy: {before}; after: {after}. More after than before: "
+            f"{'yes' if after > before else 'no'}. Rollback rule (>=3 after and >2x before): "
+            f"{after} >= 3 and {after} > {2 * max(before, 1)} -> {'roll back' if after >= 3 and after > 2 * max(before, 1) else 'keep'}.")
+
+
+def _parse_table(t: Any) -> tuple[list[str], list[list[Any]]]:
+    import csv
+    import io
+    if isinstance(t, list):  # json rows
+        cols = list(t[0])
+        return cols, [[r[c] for c in cols] for r in t]
+    if t.lstrip().startswith("|"):  # markdown
+        rows = [[c.strip() for c in ln.strip().strip("|").split("|")] for ln in t.splitlines() if "---" not in ln]
+    else:  # csv
+        rows = list(csv.reader(io.StringIO(t)))
+    cols = rows[0]
+    body = [[r[0]] + [float(x) for x in r[1:]] for r in rows[1:]]
+    return cols, body
+
+
+def trace_table(s: dict[str, Any], labels: dict[str, str]) -> str:
+    import re
+    cols, rows = _parse_table(s["table"])
+    if isinstance(s["table"], list):  # normalise json numeric cols
+        rows = [[r[0]] + [float(x) for x in r[1:]] for r in rows]
+    stmt = s["statement"]
+    col = next((c for c in cols[1:] if f" {c} " in f" {stmt} ".replace(".", " ")), cols[1])
+    i = cols.index(col)
+    val = {r[0]: r[i] for r in rows}
+    parts = []
+    if m := re.match(r"(.+) has a higher \w+ than (.+)\.$", stmt):
+        parts.append(f"{m[1]} {col}={val.get(m[1])} vs {m[2]} {col}={val.get(m[2])} -> "
+                     f"{'true' if val.get(m[1], 0) > val.get(m[2], 0) else 'false'}.")
+    elif m := re.match(r"(.+) has the highest \w+\.$", stmt):
+        top = max(val, key=val.get)
+        parts.append(f"Highest {col} is {top} ({val[top]}); claim is {m[1]} -> {'true' if val.get(m[1]) == val[top] else 'false'}.")
+    elif m := re.match(r"Exactly (-?\d+) rows have a \w+ above ([\d.]+)\.$", stmt):
+        k = sum(v > float(m[2]) for v in val.values())
+        parts.append(f"{k} rows have {col} above {m[2]}; claim {m[1]} -> {'true' if k == int(m[1]) else 'false'}.")
+    elif m := re.match(r"The total \w+ across all rows is ([\d.]+)\.$", stmt):
+        tot = round(sum(val.values()), 2)
+        parts.append(f"Sum of {col} = {tot}; claim {m[1]} -> {'true' if abs(tot - float(m[1])) < 0.01 else 'false'}.")
+    elif m := re.match(r"The \w+ of (.+) is ([\d.]+)\.$", stmt):
+        parts.append(f"{m[1]} {col}={val.get(m[1])}; claim {m[2]} -> "
+                     f"{'true' if abs(val.get(m[1], 1e9) - float(m[2])) < 1e-6 else 'false'}.")
+    if "top_row" in labels:
+        parts.append(f"Highest {col}: {max(val, key=val.get)}.")
+    return " ".join(parts) or f"Check the {col} column against the statement."
+
+
 TRACERS: dict[str, Callable[[dict[str, Any], dict[str, str]], str]] = {
     "expense": trace_expense, "inventory": trace_inventory, "incident": trace_incident,
     "eligibility": trace_eligibility, "loan": trace_loan, "subscription": trace_subscription,
+    "access_log": trace_access_log, "deploy_log": trace_deploy_log, "table": trace_table,
 }
+TRACE_FAMILIES = (*RECORD_FAMILIES, "access_log", "deploy_log", "table")
 
 
 def trace_for(kind: str, state: dict[str, Any], labels: dict[str, str]) -> str | None:
@@ -121,7 +204,7 @@ def trace_for(kind: str, state: dict[str, Any], labels: dict[str, str]) -> str |
     return fn(state, labels) if fn else None
 
 
-def deliberate_rows(n: int, seed: int, kinds: tuple[str, ...] = RECORD_FAMILIES) -> list[dict[str, Any]]:
+def deliberate_rows(n: int, seed: int, kinds: tuple[str, ...] = TRACE_FAMILIES) -> list[dict[str, Any]]:
     """Training rows with a gold trace: {state, questions, targets, trace}, one per record case."""
     from systemone_builder.kenning.synthetic_tasks import questions_for
     rng = random.Random(f"deliberate-{seed}")

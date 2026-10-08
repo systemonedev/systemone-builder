@@ -68,6 +68,9 @@ def cmd_bench(a: argparse.Namespace) -> int:
         elif a.suite == "general":
             from systemone_builder.system_one.general_suite import general_suite
             suite = await general_suite(a.n, a.seed, s.kenning_dir() / "bench_cache")
+        elif a.suite == "workflowevals":
+            from systemone_builder.system_one.workflowevals_suite import workflowevals_suite
+            suite = await workflowevals_suite(a.n, a.seed, s.kenning_dir() / "bench_cache")
         elif a.suite == "multi":
             from systemone_builder.system_one.multitask_suite import multitask_suite
             suite = await multitask_suite(a.n, a.seed, s.kenning_dir() / "bench_cache")
@@ -508,11 +511,11 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("doctor", help="check hardware, Docker, Redis and model endpoints").set_defaults(fn=cmd_doctor)
     b = sub.add_parser("bench", aliases=["s1-bench"], help="benchmark System One engines (Kenning, local LLM, opt-in Jev) on a labelled suite")
     b.add_argument("--suite", default="phishing",
-                   help="'general' (the headline: text, tables, conversations, agents, answer quality, records, logs; -n per task), 'phishing', 'multi' (14 decision tasks never trained on; -n per task), 'ood' (tasks never trained on; -n per task), 'layouts' (the phishing emails in 4 layouts), 'modern' (20 hand-written modern emails) or a JSONL file of {id, state, labels}")
+                   help="'general' (the headline: text, tables, conversations, agents, answer quality, records, logs; -n per task), 'workflowevals' (TypeSafe WorkflowEvals: agreement with the OpenAI+Anthropic consensus over 4 workflows; -n per workflow; benchmark-only), 'phishing', 'multi' (14 decision tasks never trained on; -n per task), 'ood' (tasks never trained on; -n per task), 'layouts' (the phishing emails in 4 layouts), 'modern' (20 hand-written modern emails) or a JSONL file of {id, state, labels}")
     b.add_argument("--questions", help="questions JSON for a JSONL suite ({qid: {type, instructions, criteria}})")
     b.add_argument("--gate", help="noul question used for automation metrics (default: first noul)")
     b.add_argument("--engines", default="kenning,local",
-                   help="comma-separated: kenning, local, llm (slow), jev (opt-in: needs TYPESAFE_API_KEY; your TypeSafe agreement applies)")
+                   help="comma-separated: kenning, clef, local, llm (slow), jev (opt-in: needs TYPESAFE_API_KEY), glide (opt-in: needs FASTINO_API_KEY). Hosted engines run under your own agreement and are never trained on.")
     b.add_argument("-n", type=int, default=50, help="items to sample for the built-in suite")
     b.add_argument("--seed", type=int, default=42)
     b.add_argument("--concurrency", type=int, default=8)

@@ -146,6 +146,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--deliberate", action="store_true",
                     help="train causal-LM on gold reasoning traces then the answer (rows need a 'trace' field)")
     ap.add_argument("--seed", type=int, default=13)
+    ap.add_argument("--eval-every", type=int, default=0,
+                    help="run a val-accuracy eval every N steps (0 = only at end) so a long run's trajectory is visible")
+    ap.add_argument("--ckpt-dir", help="save a servable merged checkpoint here whenever val accuracy improves")
     a = ap.parse_args(argv)
     out = Path(a.out)
     make_deterministic()
@@ -206,8 +209,26 @@ def main(argv: list[str] | None = None) -> int:
                 hit += 1
         return hit / len(read), raw
 
+    def save_servable(dirpath: Path, acc_trained: float, raw_for_temps: list) -> None:
+        """A servable merged CausalLM checkpoint, without disturbing the training adapter
+        (merge_adapter -> save base -> unmerge). ``KenningXL(dirpath)`` serves it directly."""
+        dirpath.mkdir(parents=True, exist_ok=True)
+        model.merge_adapter()
+        try:
+            model.get_base_model().save_pretrained(dirpath, safe_serialization=True)
+        finally:
+            model.unmerge_adapter()
+        tok.save_pretrained(dirpath)
+        (dirpath / CONFIG_FILE).write_text(json.dumps({
+            "name": dirpath.name, "base_model": a.base, "max_length": a.max_length,
+            "temperature": _temps(raw_for_temps) if raw_for_temps else {}, "trained_on": str(a.data),
+            "val_accuracy": {"zero_shot": acc0, "trained": acc_trained}, "checkpoint": True,
+            "created": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        }, indent=1))
+
     acc0, _ = evaluate()
     print(f"[xl-train] zero-shot val {'loss' if a.deliberate else 'accuracy'} {acc0:.3f}", flush=True)
+    best = acc0
 
     opt = torch.optim.AdamW([p for p in model.parameters() if p.requires_grad], lr=a.lr)
     steps = int(len(train) * a.epochs)
@@ -225,6 +246,15 @@ def main(argv: list[str] | None = None) -> int:
         if i % (a.grad_accum * 20) == 0:
             peak = torch.cuda.max_memory_allocated() / 2**30 if dev == "cuda" else 0
             print(f"[xl-train] step {i}/{steps} loss {loss.item() * a.grad_accum:.4f} ({time.time() - t0:.0f}s, {peak:.1f} GiB)", flush=True)
+        # periodic eval so a long run's trajectory is visible; keep the best servable checkpoint
+        if a.eval_every and not a.deliberate and (i + 1) % a.eval_every == 0 and (i + 1) < steps:
+            acc_ck, raw_ck = evaluate()
+            print(f"[xl-train] checkpoint step {i + 1}/{steps} val accuracy {acc_ck:.3f} (best {best:.3f})", flush=True)
+            if acc_ck > best:
+                best = acc_ck
+                if a.ckpt_dir:
+                    save_servable(Path(a.ckpt_dir), acc_ck, raw_ck)
+                    print(f"[xl-train] saved best checkpoint -> {a.ckpt_dir} (val {acc_ck:.3f})", flush=True)
         model.train()
     acc1, raw = evaluate()
     temps = _temps(raw)

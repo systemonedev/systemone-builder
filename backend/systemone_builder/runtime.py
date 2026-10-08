@@ -254,6 +254,14 @@ class Runtime:
         pending_teacher = await self.dpo.list(status="pending_teacher", limit=500)
         if pending_teacher:
             items.append({"kind": "dpo", "state": "running", "title": f"{len(pending_teacher)} DPO correction(s) with the teacher"})
+        # Kenning train/benchmark jobs (the core builder flow) — without these the banner shows
+        # "idle" while a training or benchmark is actually running.
+        for j in self.kenning_jobs.list(20):
+            if j.get("status") in ("queued", "running"):
+                kind = j.get("kind", "job")
+                items.append({"kind": "training" if kind == "train" else "evaluation" if kind == "bench" else kind,
+                              "state": "running", "title": f"{str(kind).title()} {str(j.get('id', ''))[:8]}",
+                              "started_at": j.get("started")})
         return {"ts": now, "busy": any(i["state"] == "running" for i in items), "items": items,
                 "factory_running": self.factory.running}
 

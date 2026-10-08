@@ -24,18 +24,22 @@ export default function ModelsPage() {
   const models = usePoll<ModelSummary[]>("/kenning/models", 10000);
   const [sel, setSel] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [activating, setActivating] = useState<string | null>(null);
   const [exported, setExported] = useState<Record<string, { size_bytes: number; seconds: number }>>({});
   const list = models.data ?? [];
   const m = list.find((x) => x.name === sel) ?? list.find((x) => x.active) ?? list[0];
 
   const activate = async (name: string) => {
     setErr(null);
+    setActivating(name);
     try {
       await api(`/kenning/models/${encodeURIComponent(name)}/activate`, { method: "POST" });
       notify(`${name} is now serving`, "ok");
       models.reload();
     } catch (e: any) {
       setErr(e.message);
+    } finally {
+      setActivating(null);
     }
   };
   const exportBundle = async (name: string) => {
@@ -65,6 +69,11 @@ export default function ModelsPage() {
     <div>
       <PageTitle title="Models" sub="Trained Kenning models in the workspace volume. Activate one to serve it; export one to use it elsewhere." />
       <ErrorNote error={err ?? models.error} />
+      {activating && (
+        <p className="mb-3 text-xs text-ink-3">
+          Activating <span className="font-medium text-ink-2">{activating}</span>… hot-swapping the Kenning server; this can take ~a minute right after a training run while the server warms up.
+        </p>
+      )}
       {!models.data ? (
         <Empty>Loading models…</Empty>
       ) : list.length === 0 ? (
@@ -116,8 +125,13 @@ export default function ModelsPage() {
               title={m.name}
               actions={
                 <>
-                  <Button variant="primary" disabled={m.active} onClick={() => activate(m.name)} title="Hot-swap the Kenning server to this model">
-                    {m.active ? "Active" : "Activate"}
+                  <Button
+                    variant="primary"
+                    disabled={m.active || activating !== null}
+                    onClick={() => activate(m.name)}
+                    title="Hot-swap the Kenning server to this model (can take ~a minute right after a training run, while the server warms up)"
+                  >
+                    {activating === m.name ? "Activating…" : m.active ? "Active" : "Activate"}
                   </Button>
                   <Button onClick={() => exportBundle(m.name)} title="Build a zip with weights, model card, licences and checksums">
                     Export
