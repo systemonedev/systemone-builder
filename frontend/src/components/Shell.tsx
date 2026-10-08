@@ -21,21 +21,6 @@ const NAV: { section: string; hint?: string; pipeline?: boolean; items: { href: 
       { href: "/connect", label: "Connect" },
     ],
   },
-  {
-    section: "Legacy pipeline",
-    hint: "The original generative path: vLLM student → triage → oracle",
-    pipeline: true,
-    items: [
-      { href: "/telemetry", label: "Telemetry" },
-      { href: "/routing", label: "Fast-Slow Routing" },
-      { href: "/playground", label: "Playground" },
-      { href: "/replay", label: "Replay Explorer" },
-      { href: "/dpo", label: "DPO Corrections" },
-      { href: "/training", label: "Factory & Training" },
-      { href: "/eval", label: "Evaluation" },
-      { href: "/workflows", label: "Prompt-to-Workflow" },
-    ],
-  },
 ];
 
 function ThemeToggle() {
