@@ -44,7 +44,7 @@ CONFIG_FILE = "kenning.json"
 LEGACY_CONFIG_FILES = ("s1_config.json",)  # written by models trained before the Kenning rename
 TEMPLATE_VERSION = 1
 # Served when nothing else is configured: the published, calibrated Kenning (Apache-2.0).
-DEFAULT_MODEL = "systemonedev/kenning-large-v0.4"
+DEFAULT_MODEL = "systemonedev/kenning-large-v0.5"
 # Starting point for training: a zero-shot NLI model with no non-commercial data (MIT).
 DEFAULT_BASE = "MoritzLaurer/deberta-v3-large-zeroshot-v2.0-c"
 

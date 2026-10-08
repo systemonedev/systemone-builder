@@ -42,7 +42,7 @@ The first `up` downloads, once:
 |---|---|---|
 | `systemone-kenning` image (includes PyTorch and CUDA) | 4.3 GB | [GitHub Container Registry](https://github.com/orgs/systemonedev/packages) |
 | `systemone-api` and `systemone-dashboard` images | 0.1 GB each | GitHub Container Registry |
-| `kenning-large-v0.4` weights | 0.9 GB | [Hugging Face](https://huggingface.co/systemonedev/kenning-large-v0.4) |
+| `kenning-large-v0.5` weights | 0.9 GB | [Hugging Face](https://huggingface.co/systemonedev/kenning-large-v0.5) |
 | `redis` image | ~0.05 GB | Docker Hub |
 
 `S1_IMAGE_TAG` chooses the image build: `main` by default, or a release version. To build from your
@@ -78,10 +78,10 @@ print(answer.nouls["billing"].noul)        # 0.93
 ```
 
 Out of the box, Kenning serves the trained flagship,
-[**systemonedev/kenning-large-v0.4**](https://huggingface.co/systemonedev/kenning-large-v0.4) (Apache-2.0),
+[**systemonedev/kenning-large-v0.5**](https://huggingface.co/systemonedev/kenning-large-v0.5) (Apache-2.0),
 downloaded from Hugging Face on first start together with its calibration. Activate a model you
 trained on the *Models* page, or set `S1_KENNING_MODEL` in `.env` to serve another one. To use it
-without a server: `Kenning.from_pretrained("systemonedev/kenning-large-v0.4")` (`pip install
+without a server: `Kenning.from_pretrained("systemonedev/kenning-large-v0.5")` (`pip install
 "systemone-client[local]"`).
 
 ## Kenning results
@@ -93,26 +93,34 @@ Benchmarks run with `systemone bench`. The full method, data and caveats are in
 families, macro accuracy). Clef is the development target. Jev is compared again once Kenning matches
 Clef.
 
-| Family | Kenning v0.4 | [Clef-flash](https://blog.cloudflare.com/clef-decision-models/) |
-|---|---|---|
-| **All 30 questions (macro)** | **0.625** | **0.813** |
-| Text: evidence, sentiment, toxicity, injection, intent, topic (14) | 0.754 | 0.841 |
-| Conversations (1) | 0.958 | 1.000 |
-| Answer quality (2) | 0.377 | 0.447 |
-| Agent decisions: tool calls, task completion (3) | 0.553 | 0.793 |
-| Records: rules over JSON with numbers and dates (7) | 0.535 | 0.857 |
-| Tables (1) | 0.480 | 0.860 |
-| Logs (2) | 0.290 | 0.740 |
-| Latency p50 / GPU memory (one RTX 3090) | 34 ms / ~2 GB | 149 ms / ~18 GB |
+| Family | Kenning v0.5 | [Clef-flash](https://blog.cloudflare.com/clef-decision-models/) | TypeSafe Jev (hosted) |
+|---|---|---|---|
+| **All 30 questions (macro)** | **0.653** | **0.791** | **0.830** |
+| Text: evidence, sentiment, toxicity, injection, intent, topic (14) | 0.756 | 0.841 | 0.834 |
+| Conversations (1) | 0.979 | 1.000 | 1.000 |
+| Answer quality (2) | **0.479** | 0.447 | 0.498 |
+| Agent decisions: tool calls, task completion (3) | 0.727 | 0.793 | 0.900 |
+| Records: rules over JSON with numbers and dates (7) | 0.587 | 0.857 | 0.921 |
+| Tables (1) | 0.520 | 0.860 | 0.940 |
+| Logs (2) | 0.520 | 0.740 | 0.720 |
+| Latency p50 / GPU memory (one RTX 3090) | 35 ms / ~2 GB | 125 ms / ~18 GB | ~150 ms (hosted) |
 
-Kenning is close to Clef on text, about 20 times smaller and 4 times faster, and behind on
-structured state: records, tables, agent steps and long logs (it reads 512 tokens per option). That
-gap is what the next version is for. Until then, train it on your own problem (below) and measure it
-on your data.
+Kenning v0.5 **beats both big engines on answer quality**, is close on text and conversation, about 20 times
+smaller and 4 times faster than Clef, and behind on structured state — records, tables, agent steps and long
+logs — because the 435M cross-encoder reads 512 tokens per option with nowhere to compute over the state.
+
+Closing that gap is what **Kenning-XL (v0.6, experimental)** is for: a small decoder that reasons over the
+whole state, with a **deliberate mode** that works through a ground-truth reasoning chain before answering.
+Served as a two-tier cascade, it narrows the gap to Clef by about half (macro **0.688** as served vs Clef's
+0.791), **beats Clef on agent decisions (0.867) and answer quality**, and lifts records and tables through
+learned reasoning. The fast reflex pass answers in ~35 ms; the deliberate pass trades speed for accuracy. It
+is on the [`kenning-xl` branch](https://github.com/systemonedev/systemone-builder/tree/kenning-xl), not yet a
+published model — full method and open items in [docs/kenning.md](docs/kenning.md). Until then, train Kenning
+on your own problem (below) and measure it on your data.
 
 <details><summary>Email suites (regression checks)</summary>
 
-| | Kenning v0.4 | Clef-flash | TypeSafe Jev (hosted) |
+| | Kenning v0.5 | Clef-flash | TypeSafe Jev (hosted) |
 |---|---|---|---|
 | Held-out modern emails: accuracy | 0.75 | 0.90 | 0.90 |
 | Held-out modern emails: phishing auto-closed as safe | **0** | 0 | 0 |
@@ -129,9 +137,9 @@ The **Train** page does all of this from the dashboard, and **Verify** benchmark
 command line:
 
 **For your own problem.** Describe it once and a teacher LLM writes labelled cases; or bring your own
-labelled data; or both. Out of the box, v0.4 is unsure on agent steps (asked whether an agent should
-check with the user before switching them to a $499 plan, it says 0.42), which is the kind of gap a
-few thousand cases close.
+labelled data; or both. For example, on agent steps the reflex model is unsure (asked whether an agent
+should check with the user before switching them to a $499 plan, Kenning v0.5 says ~0.5), which is the kind
+of gap a few thousand cases — or the v0.6 deliberate reasoner — close.
 
 ```bash
 # built-in specs: computer_use, insurance_claim, chat_moderation (or write your own)
