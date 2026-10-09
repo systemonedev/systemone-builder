@@ -9,10 +9,11 @@ the `general` suite (1,328 held-out items; `systemone bench --suite general`). C
 SystemOne models all answer the same wire format (`POST /v1/systemone`; typed questions → calibrated
 probabilities, no text). Two engine families now exist:
 
-- **Kenning** (the reflex) — a 435M DeBERTa **cross-encoder**. Scores each option in one pass over ≤512
-  tokens. ~35 ms. Strong on text, safety, routing, conversation, answer-quality; structurally cannot
-  compute over the state (numbers, tables, long logs). `kenning/model.py`, served by `kenning/serve.py`.
-- **Kenning-XL** (the deliberate reasoner, v0.6, experimental) — a small **decoder** (Qwen3-1.7B) with a
+- **Kenning** (the reflex) — a **cross-encoder** that scores each option in one pass. Two published
+  Apache-2.0 models: **v0.5** (435M DeBERTa, ≤512 tokens, ~35 ms — the fast option) and **v0.6** (≈400M
+  ModernBERT, 2,048-token long context, ~285 ms, general macro **0.753** — the accurate option; beats Clef
+  on agent/conversation/quality/logs). `kenning/model.py`, served by `kenning/serve.py`.
+- **Kenning-XL** (experimental decoder) — a small **decoder** (Qwen3-1.7B / 4B) with a
   **constrained answer-token readout**: renders (state, question) and reads the next-token distribution
   over the answer tokens in one pass, so the full LM reasons over the whole 4k-token state. An optional
   **deliberate mode** generates a short reasoning trace first, then reads the answer — for numeric /
@@ -21,7 +22,29 @@ probabilities, no text). Two engine families now exist:
 
 ## Models
 
-### kenning-large-v0.6 (experimental; branch `kenning-xl`) — 2026-10
+### kenning-large-v0.6 — 2026-10 (published, Apache-2.0)
+The long-context reflex: a ≈400M **ModernBERT cross-encoder** (base `tasksource/ModernBERT-large-nli`) over a
+2,048-token window, so it sees the whole state in one pass. General macro **0.753** (v0.5 0.653), held-out
+0.905, ECE 0.006. Published: https://huggingface.co/systemonedev/kenning-large-v0.6
+
+| | v0.6 | v0.5 | Clef | Jev |
+|---|---|---|---|---|
+| **macro** | **0.753** | 0.653 | 0.791 | 0.830 |
+| agent | **0.827** | 0.727 | 0.793 | 0.900 |
+| conversation | 1.000 | 0.979 | 1.000 | 1.000 |
+| quality | **0.457** | 0.479 | 0.447 | 0.498 |
+| text | 0.813 | 0.756 | 0.841 | 0.834 |
+| table | 0.680 | 0.520 | 0.860 | 0.940 |
+| records | 0.651 | 0.587 | 0.857 | 0.921 |
+| logs | **0.790** | 0.520 | 0.740 | 0.720 |
+
+- **Beats Clef on agent, conversation, answer quality and logs** (logs 0.79 beats Clef *and* Jev); closes
+  most of the general-suite gap to Clef (0.791) at a twentieth of its size.
+- The long context unlocks logs (0.52 → 0.79) and lifts tables/records without the decoder's deliberate
+  reasoning — the reflex sees enough of the state in one pass.
+- Trade-off: ~285 ms p50 vs v0.5's 35 ms (2,048-token ModernBERT-large). **v0.5 stays the fast option.**
+
+### Kenning-XL (experimental decoder) — 2026-10
 Decoder + readout, with gold-trace deliberate reasoning. A **two-tier cascade** routes each question:
 one-pass Kenning-XL for text/agent/conversation, gold-trace **deliberate** Kenning-XL for records/tables,
 the v0.5 reflex for logs/quality.
