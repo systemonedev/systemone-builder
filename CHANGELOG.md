@@ -51,7 +51,7 @@ the v0.5 reflex for logs/quality.
 
 General suite, per-family mean (same basis for all columns):
 
-| | v0.6 cascade | v0.5 | Clef | Jev |
+| | XL cascade | v0.5 | Clef | Jev |
 |---|---|---|---|---|
 | **macro (as served)** | **0.688** | 0.653 | 0.791 | 0.830 |
 | agent | **0.867** | 0.727 | 0.793 | 0.900 |
