@@ -19,6 +19,8 @@ from typing import Any
 
 import httpx
 
+from systemone_builder.kenning import criteria
+
 
 @dataclass
 class Attr:
@@ -132,7 +134,7 @@ def questions_for(attrs: list[Attr], labels: dict[str, str], rng: random.Random)
         names = list(attr.labels)
         instr = rng.choice(attr.question)
         if set(names) == {"yes", "no"}:
-            qs[attr.name] = {"type": "noul", "instructions": instr}
+            qs[attr.name] = criteria.noul(rng, instr, attr.labels.get("yes"), attr.labels.get("no"))
             targets[attr.name] = int(truth == "yes")
         elif attr.ordinal and rng.random() < 0.6:
             qs[attr.name] = {"type": "score", "instructions": instr,
@@ -146,7 +148,8 @@ def questions_for(attrs: list[Attr], labels: dict[str, str], rng: random.Random)
             targets[attr.name] = truth
         else:  # "is it X?" with the true or a wrong label, half and half
             ask = truth if rng.random() < 0.5 else rng.choice([n for n in names if n != truth])
-            qs[attr.name] = {"type": "noul", "instructions": f"{instr.rstrip('?')} - is the answer \"{ask}\"?"}
+            qs[attr.name] = criteria.about_label(rng, f"{instr.rstrip('?')} - is the answer \"{ask}\"?",
+                                                 ask, attr.labels.get(ask), names)
             targets[attr.name] = int(ask == truth)
     return {"questions": qs, "targets": targets}
 

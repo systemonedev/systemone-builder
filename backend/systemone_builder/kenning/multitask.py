@@ -46,6 +46,7 @@ from typing import Any, Callable
 
 import httpx
 
+from systemone_builder.kenning import criteria
 from systemone_builder.kenning.layouts import vary
 from systemone_builder.system_one.bench import hf_get
 MAX_CHARS = 1500
@@ -92,7 +93,8 @@ def _humanize(label: str) -> str:
 def _genre_question(rng: random.Random, own: str) -> tuple[str, dict[str, Any], int]:
     """A noul asking whether the text is of some genre: its own one or another."""
     other = own if rng.random() < 0.35 else rng.choice([g for g in GENRES if g != own])
-    return "q_genre", {"type": "noul", "instructions": f"Is this text {GENRES[other]}?"}, int(other == own)
+    return "q_genre", criteria.noul(rng, f"Is this text {GENRES[other]}?", f"It is {GENRES[other]}.",
+                                    "It is a different kind of text from that."), int(other == own)
 
 
 def _row(state: Any, qs: dict[str, Any], targets: dict[str, Any], ctx: Ctx, genre: str) -> dict[str, Any]:
@@ -113,7 +115,10 @@ def make_amazon(row: dict[str, Any], ctx: Ctx) -> dict[str, Any] | None:
                           "Would this reviewer recommend the product?"] if ask_pos else
                          ["Is this review negative?", "Is the customer unhappy with the product?",
                           "Is the reviewer complaining?"])
-        qs = {"q_sentiment": {"type": "noul", "instructions": instr}}
+        happy = "The reviewer is satisfied and would recommend the product."
+        unhappy = "The reviewer is dissatisfied, complaining, or would not recommend it."
+        qs = {"q_sentiment": criteria.noul(r, instr, happy if ask_pos else unhappy,
+                                           unhappy if ask_pos else happy)}
         targets: dict[str, Any] = {"q_sentiment": int(pos == ask_pos)}
     else:
         opts = r.choice([("positive", "negative"), ("satisfied", "dissatisfied"), ("good experience", "bad experience")])
@@ -141,7 +146,8 @@ def make_dbpedia(row: dict[str, Any], ctx: Ctx) -> dict[str, Any] | None:
         targets: dict[str, Any] = {"q_topic": truth}
     else:
         ask = truth if r.random() < 0.5 else r.choice([n for n in names if n != truth])
-        qs = {"q_topic": {"type": "noul", "instructions": f"Is this article about a {ask.lower()}?"}}
+        qs = {"q_topic": criteria.about_label(r, f"Is this article about a {ask.lower()}?",
+                                              ask.lower(), None, [n.lower() for n in names])}
         targets = {"q_topic": int(ask == truth)}
     return _row(state, qs, targets, ctx, "dbpedia")
 
@@ -171,7 +177,8 @@ def make_clinc(row: dict[str, Any], ctx: Ctx) -> dict[str, Any] | None:
         if truth == "oos":
             return None
         ask = truth if r.random() < 0.5 else r.choice(real)
-        qs = {"q_intent": {"type": "noul", "instructions": f"Is the user asking about: {_humanize(ask)}?"}}
+        qs = {"q_intent": criteria.about_label(r, f"Is the user asking about: {_humanize(ask)}?",
+                                               _humanize(ask), None, [_humanize(o) for o in real])}
         targets = {"q_intent": int(ask == truth)}
     return _row(state, qs, targets, ctx, "clinc")
 
@@ -190,7 +197,9 @@ def make_nli(row: dict[str, Any], ctx: Ctx) -> dict[str, Any] | None:
     hyp = row["hypothesis"].strip().rstrip(".")
     state = {"text": _clip(row["premise"])}
     if ctx.rng.random() < 0.6:
-        qs = {"q_claim": {"type": "noul", "instructions": f"Does the text imply that {hyp[0].lower() + hyp[1:]}?"}}
+        qs = {"q_claim": criteria.noul(ctx.rng, f"Does the text imply that {hyp[0].lower() + hyp[1:]}?",
+                                       "The text states it, or it follows from what the text says.",
+                                       "The text contradicts it, or says nothing either way.")}
         targets: dict[str, Any] = {"q_claim": int(label == 0)}
     else:
         crit = {"supported": "The text says or clearly implies it",
@@ -216,11 +225,21 @@ def make_civil(row: dict[str, Any], ctx: Ctx) -> dict[str, Any] | None:
     r = ctx.rng
     state = {"comment": _clip(row["text"])}
     if r.random() < 0.6:
-        field, instr = r.choice([("toxicity", "Is this comment toxic?"), ("insult", "Is this comment insulting?"),
-                                 ("threat", "Does this comment contain a threat?"),
-                                 ("obscene", "Is this comment obscene?")])
+        field, instr, yes_d, no_d = r.choice([
+            ("toxicity", "Is this comment toxic?",
+             "It is rude, disrespectful or hostile enough that a reader would want to leave the discussion.",
+             "It is civil, or merely blunt or critical without hostility."),
+            ("insult", "Is this comment insulting?",
+             "It demeans or name-calls a person or group.",
+             "It criticises an idea, argument or thing rather than demeaning anyone."),
+            ("threat", "Does this comment contain a threat?",
+             "It states an intention to harm someone, or wishes harm on them.",
+             "It expresses anger or dislike without any intention or wish of harm."),
+            ("obscene", "Is this comment obscene?",
+             "It uses sexual or scatological language, or heavy profanity.",
+             "It is free of obscene language, even where it is otherwise hostile.")])
         # soft target: the fraction of annotators who said yes
-        qs = {"q_tox": {"type": "noul", "instructions": instr}}
+        qs = {"q_tox": criteria.noul(r, instr, yes_d, no_d)}
         targets: dict[str, Any] = {"q_tox": round(float(row[field]), 4)}
     else:
         qs = {"q_tox": {"type": "score", "instructions": "How toxic is this comment?", "criteria": TOXIC_LEVELS}}
@@ -245,8 +264,10 @@ def make_helpsteer(row: dict[str, Any], ctx: Ctx) -> dict[str, Any] | None:
             "criteria": HELPFUL_LEVELS}
         targets["q_helpful"] = 0 if helpful <= 1 else 1 if helpful == 2 else 2
     if correct in (0, 1, 4) and (not qs or ctx.rng.random() < 0.5):  # skip the ambiguous middle
-        qs["q_correct"] = {"type": "noul", "instructions": ctx.rng.choice(
-            ["Is the assistant's answer factually correct?", "Is everything in the answer accurate?"])}
+        qs["q_correct"] = criteria.noul(ctx.rng, ctx.rng.choice(
+            ["Is the assistant's answer factually correct?", "Is everything in the answer accurate?"]),
+            "Every factual claim in the answer is accurate.",
+            "At least one claim in the answer is wrong, invented, or contradicts the request.")
         targets["q_correct"] = int(correct == 4)
     return _row(state, qs, targets, ctx, "helpsteer") if qs else None
 
