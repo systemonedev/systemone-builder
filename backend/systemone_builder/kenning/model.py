@@ -53,8 +53,17 @@ def hypotheses(q: Question) -> tuple[list[str], list[Any]]:
     """Hypothesis texts for one question and the options they stand for."""
     stem = q.instructions.strip()
     if q.type == "noul":
-        crit = describe(q.criteria)
-        suffix = f" ({crit})" if crit else ""
+        # A {"true": ..., "false": ...} criteria dict describes the two *answers*, so each
+        # hypothesis gets only its own side (as choice does). Folding both into both leaves the
+        # pair identical apart from "yes."/"no.", which is no signal at all.
+        crit = q.criteria
+        if isinstance(crit, dict) and ({"true", "false"} & set(crit) or {"yes", "no"} & set(crit)):
+            yes_d = describe(crit.get("true", crit.get("yes")))
+            no_d = describe(crit.get("false", crit.get("no")))
+            return ([f"{stem} Answer: yes." + (f" {yes_d}" if yes_d else ""),
+                     f"{stem} Answer: no." + (f" {no_d}" if no_d else "")], ["yes", "no"])
+        shared = describe(crit)
+        suffix = f" ({shared})" if shared else ""
         return [f"{stem}{suffix} Answer: yes.", f"{stem}{suffix} Answer: no."], ["yes", "no"]
     if q.type == "choice":
         opts = list(q.criteria)  # type: ignore[arg-type]
