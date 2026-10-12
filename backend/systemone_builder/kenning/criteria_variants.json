@@ -1210,6 +1210,1001 @@
      "false": "Focusing on visit times, prescription renewals, file requests, or payment/billing questions."
     }
    ]
+  },
+  "change_review.safe_to_auto_apply": {
+   "kind": "yes_no",
+   "variants": [
+    {
+     "true": "Modifies isolated, non-critical config files with immediate rollback capability and no external service dependencies.",
+     "false": "Touches shared schemas, stateful databases, or core business logic where errors persist beyond simple reverts."
+    },
+    {
+     "true": "Updates cosmetic assets or localized strings with zero impact on data integrity or user session continuity.",
+     "false": "Alters authentication flows, payment processing, or persistent storage layers where failures cause data corruption."
+    },
+    {
+     "true": "Changes are confined to read-only endpoints with built-in idempotency and no side effects on external systems.",
+     "false": "Involves writes to production environments, third-party API calls, or complex transactional logic requiring manual verification."
+    }
+   ]
+  },
+  "change_review.breaking": {
+   "kind": "yes_no",
+   "variants": [
+    {
+     "true": "Existing API signatures, database schemas, or external service contracts are altered in a backward-incompatible manner.",
+     "false": "New optional fields, internal private helper methods, or isolated utility functions are added without touching public interfaces."
+    },
+    {
+     "true": "The change removes, renames, or modifies logic that currently executes in live traffic paths.",
+     "false": "The change adds new code paths, new configuration keys, or new files that do not replace existing logic."
+    },
+    {
+     "true": "Data migration scripts, serialization formats, or network protocol handlers are updated in ways that invalidate current payloads.",
+     "false": "New data tables, new endpoints, or additive logging statements are introduced that do not alter existing data structures."
+    }
+   ]
+  },
+  "change_review.risk_area.none": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "The scenario involves no data breach, security hole, downtime, or third-party dependency failure whatsoever.",
+     "false": "Minor data loss, single-point security weakness, brief service interruption, or external API instability are present."
+    },
+    {
+     "true": "No aspect of data integrity, security posture, system availability, or external dependency is at risk or compromised.",
+     "false": "Any compromise to data, vulnerability in security, reduction in uptime, or reliance on flaky third-party services."
+    },
+    {
+     "true": "The situation is entirely benign, with zero impact on data, security, availability, or dependency health.",
+     "false": "Presence of data corruption, security exposure, service degradation, or third-party integration failures, even if minor."
+    }
+   ]
+  },
+  "change_review.risk_area.data": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "The action directly modifies stored records, database structure, or executes bulk data movement.",
+     "false": "Changes affect application logic, network security policies, service uptime, or external library versions."
+    },
+    {
+     "true": "The risk stems from corrupting, losing, or structurally altering persistent information in a database.",
+     "false": "The concern is unauthorized access, service outages, broken integrations, or code dependency conflicts."
+    },
+    {
+     "true": "The primary danger involves direct manipulation of row-level data, table schemas, or migration scripts.",
+     "false": "The issue concerns authentication flaws, resource exhaustion, third-party service failures, or package updates."
+    }
+   ]
+  },
+  "change_review.risk_area.security": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "The core issue involves unauthorized access, credential leakage, privilege escalation, or exposure of sensitive system internals.",
+     "false": "The risk stems from data corruption, service outage, third-party failure, or loss of business continuity without a breach."
+    },
+    {
+     "true": "The primary danger is the compromise of authentication mechanisms, secret management, or permission boundaries allowing illicit entry.",
+     "false": "The concern is data integrity, system uptime, reliance on external vendors, or general operational instability rather than intrusion."
+    },
+    {
+     "true": "The scenario centers on protecting identity verification, key storage, or access control lists from malicious exploitation or theft.",
+     "false": "The issue relates to data accuracy, service availability, supply chain vulnerabilities, or non-security operational inefficiencies."
+    }
+   ]
+  },
+  "change_review.risk_area.availability": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "The core failure involves service uptime, traffic handling, or infrastructure connectivity preventing user access.",
+     "false": "Excludes data corruption, unauthorized access, third-party API failures, or scenarios with zero functional impact."
+    },
+    {
+     "true": "The scenario centers on outages, resource exhaustion, latency spikes, or network partitions blocking operational continuity.",
+     "false": "Excludes information breaches, sensitive data leakage, external service dependencies, or non-impacting theoretical concerns."
+    },
+    {
+     "true": "The risk stems from inability to deploy, scale, or route traffic, resulting in lost service time.",
+     "false": "Excludes record tampering, credential theft, broken external integrations, or situations lacking tangible operational disruption."
+    }
+   ]
+  },
+  "change_review.risk_area.dependency": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "The risk stems from third-party library version changes, API breaks, or supply chain compromise.",
+     "false": "Risks involve internal data leakage, service downtime, or direct security vulnerabilities unrelated to external dependencies."
+    },
+    {
+     "true": "The primary concern is managing external package updates, transitive dependency conflicts, or vendor reliability issues.",
+     "false": "The issue is internal data integrity, system availability outages, or direct code security flaws."
+    },
+    {
+     "true": "The danger arises from reliance on external software components, their update cycles, or third-party maintenance.",
+     "false": "The threat is internal data corruption, service unavailability, or direct exploitation of internal code."
+    }
+   ]
+  },
+  "chat_moderation.violates_rules": {
+   "kind": "yes_no",
+   "variants": [
+    {
+     "true": "Message targets an individual with abuse, hatred, threats, exposure of private data, or deceptive commercial intent.",
+     "false": "General criticism, mild profanity, playful teasing, or factual statements lacking malicious intent toward a specific person."
+    },
+    {
+     "true": "Content includes harassment, hate speech, violence, doxxing, fraud, or unsolicited repetitive commercial promotion directed at users.",
+     "false": "Disagreement, sarcasm, mild insults, or constructive feedback that does not incite harm, fear, or financial loss."
+    },
+    {
+     "true": "The text exhibits hostile intent, discriminatory attacks, personal data leaks, scam tactics, or spam behavior violating safety policies.",
+     "false": "Expressing strong negative opinions, using slang, or debating topics without threatening safety, privacy, or financial well-being."
+    }
+   ]
+  },
+  "chat_moderation.category.ok": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "The text contains neutral conversational content, standard greetings, or benign inquiries without malicious intent.",
+     "false": "The text targets individuals with abuse, promotes illicit schemes, or extracts sensitive private data."
+    },
+    {
+     "true": "The message serves legitimate social interaction, asking questions or sharing non-harmful thoughts safely.",
+     "false": "The message constitutes bullying, deceptive advertising, or unauthorized disclosure of personal identifiers."
+    },
+    {
+     "true": "The communication is harmless, routine, or friendly, lacking any harmful intent or deceptive patterns.",
+     "false": "The communication involves aggressive targeting, financial fraud attempts, or revealing confidential personal details."
+    }
+   ]
+  },
+  "chat_moderation.category.harassment": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "Direct personal insults or coordinated attacks target a specific individual's identity or character.",
+     "false": "General hate speech, spam links, doxxing, or neutral conversation without personal malice."
+    },
+    {
+     "true": "The message attacks a specific person’s worth or coordinates a crowd to bully them.",
+     "false": "Discriminatory slurs, promotional spam, exposed private data, or standard acceptable discourse."
+    },
+    {
+     "true": "Intent is to degrade a named individual through insults or group harassment tactics.",
+     "false": "Hate-based rhetoric, deceptive scams, personal data leaks, or benign, non-aggressive communication."
+    }
+   ]
+  },
+  "chat_moderation.category.hate": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "Targets protected groups via slurs, dehumanization, or calls for violence based on immutable characteristics.",
+     "false": "Targets specific individuals, requests private data, promotes fraud, or expresses rude opinions without group-based hostility."
+    },
+    {
+     "true": "Expresses hostility toward a demographic group using derogatory language or advocating harm against that collective.",
+     "false": "Direct insults at named people, financial pitches, privacy violations, or general profanity lacking group-targeted intent."
+    },
+    {
+     "true": "Attacks a class of people defined by race, religion, gender, or similar traits with abusive intent.",
+     "false": "Harassment of specific users, spam links, identity theft attempts, or non-group-specific rude commentary."
+    }
+   ]
+  },
+  "chat_moderation.category.scam_or_spam": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "Message solicits money, trades accounts, offers fake prizes, or directs to external links for gain.",
+     "false": "Genuine support replies, personal grievances, identity threats, or private data leaks without financial solicitation."
+    },
+    {
+     "true": "Text pushes commercial products, requests credentials, or promises unearned rewards via external URLs.",
+     "false": "Aggressive insults, doxxing attempts, or legitimate customer service interactions lacking deceptive commercial intent."
+    },
+    {
+     "true": "Content promotes fraudulent schemes, unsolicited advertising, or illicit account transfers to extract value.",
+     "false": "Verbal abuse, hate speech, exposure of personal details, or standard informational messages."
+    }
+   ]
+  },
+  "chat_moderation.category.personal_info": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "The text contains specific, identifiable real-world identifiers like a full legal name, street address, or direct phone number.",
+     "false": "Generic usernames, fictional names, vague locations, or placeholder data that do not identify a real individual."
+    },
+    {
+     "true": "The message discloses non-public, identifying contact details or residential addresses belonging to a specific real person.",
+     "false": "Public business addresses, social media handles, or generalized geographic regions without specific street-level precision."
+    },
+    {
+     "true": "Specific, verifiable personal identifiers such as full names, home addresses, or direct contact methods are explicitly stated.",
+     "false": "Anonymized aliases, corporate locations, or incomplete data points insufficient to uniquely identify a private individual."
+    }
+   ]
+  },
+  "chat_moderation.action.none": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "The user's behavior is acceptable, requiring no intervention, warning, muting, or banning.",
+     "false": "The user violated rules requiring a warning, muting, or permanent removal."
+    },
+    {
+     "true": "The interaction is benign, polite, or compliant, necessitating no moderator action.",
+     "false": "The content is abusive, spammy, or harmful, demanding a warning, mute, or ban."
+    },
+    {
+     "true": "The situation is routine and safe, with no policy breaches needing correction.",
+     "false": "The message contains harassment, spam, or threats, triggering a warning, mute, or ban."
+    }
+   ]
+  },
+  "chat_moderation.action.warn": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "The violation warrants removal and a formal warning, falling short of the severity requiring muting or banning.",
+     "false": "The action is merely a removal without a warning, or the severity demands muting, banning, or no action."
+    },
+    {
+     "true": "Moderation involves deleting the content and issuing a warning, distinguishing it from silence or permanent exclusion.",
+     "false": "The response is deletion only, muting, banning, or inaction, lacking the dual component of removal and warning."
+    },
+    {
+     "true": "The correct response is to remove the post and send a warning, excluding muting, banning, or no action.",
+     "false": "The situation requires only removal, muting, banning, or no moderation, rather than the specific combination of removal and warning."
+    }
+   ]
+  },
+  "chat_moderation.action.mute": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "The conduct is severe, repeated, or abusive, requiring immediate removal and temporary silencing of the participant.",
+     "false": "The behavior warrants a formal warning, a permanent ban, or no action at all."
+    },
+    {
+     "true": "The violation demands temporary removal from the channel to stop disruption, not permanent exile or simple caution.",
+     "false": "The situation calls for a permanent ban, a verbal warning, or no moderator intervention."
+    },
+    {
+     "true": "The infraction is serious enough to justify temporary silencing and removal, but not severe enough for permanent banning.",
+     "false": "The response is a formal warning, a permanent ban, or no action taken."
+    }
+   ]
+  },
+  "chat_moderation.action.ban": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "The user's misconduct explicitly warrants permanent removal and account banning from the platform immediately.",
+     "false": "The violation is minor, first-offense, or better addressed with a warning, temporary mute, or no action."
+    },
+    {
+     "true": "The behavior constitutes a severe breach requiring the user to be removed and banned from the community.",
+     "false": "The infraction is less severe, suitable for a warning, temporary silence, or requires no moderator intervention."
+    },
+    {
+     "true": "The situation demands the strongest disciplinary action: deleting the user's presence and banning their account.",
+     "false": "The issue is less critical, where a warning, temporary muting, or simply ignoring the behavior is appropriate."
+    }
+   ]
+  },
+  "computer_use.advances_goal": {
+   "kind": "yes_no",
+   "variants": [
+    {
+     "true": "The action directly advances the current objective or resolves a blocking dependency hindering progress.",
+     "false": "The action targets an unrelated system, repeats a previously failed attempt, or reverts to an earlier state."
+    },
+    {
+     "true": "The step logically follows the current state and produces a new, necessary artifact or status change.",
+     "false": "The step is redundant, addresses a different goal, or undoes work completed in prior steps."
+    },
+    {
+     "true": "The action reduces the gap between current status and the defined end goal.",
+     "false": "The action maintains the status quo, introduces unrelated complexity, or contradicts the established direction."
+    }
+   ]
+  },
+  "computer_use.needs_confirmation": {
+   "kind": "yes_no",
+   "variants": [
+    {
+     "true": "The action consumes funds, transmits data externally, permanently removes records, exposes private information, or legally binds the user.",
+     "false": "The action is internal, reversible, read-only, or involves drafting without final submission, external sharing, or commitment."
+    },
+    {
+     "true": "Executing the step creates a financial charge, publishes content, erases data irreversibly, discloses PII, or signifies agreement to terms.",
+     "false": "The step involves browsing, querying, viewing, or entering draft text that remains unsubmitted, private, and easily modifiable."
+    },
+    {
+     "true": "The operation results in monetary outflow, external message delivery, permanent data loss, personal data exposure, or contractual acceptance.",
+     "false": "The operation is limited to inspection, navigation, search, or temporary input that can be cancelled without external effect."
+    }
+   ]
+  },
+  "computer_use.risk.low": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "The action involves no financial loss, data deletion, or irreversible state changes. It is fully reversible with no impact on external parties.",
+     "false": "The action triggers notifications, modifies shared records, incurs minor costs, or requires manual intervention to fully restore the previous state."
+    },
+    {
+     "true": "Executing the action requires no user confirmation, creates no permanent artifacts, and can be instantly reverted without side effects or data loss.",
+     "false": "The action sends emails, alters permissions, creates new entries, or has a delay between execution and potential reversal."
+    },
+    {
+     "true": "The operation is read-only or strictly local, leaving all external systems, databases, and user-visible states completely unchanged and unaffected.",
+     "false": "The operation writes to any log, updates a timestamp, changes a status flag, or impacts any other user's view."
+    }
+   ]
+  },
+  "computer_use.risk.medium": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "The action is hard to reverse or modifies user account settings, creating significant inconvenience for the owner.",
+     "false": "Trivially reversible edits, read-only queries, or irreversible data destruction requiring explicit high-risk confirmation."
+    }
+   ]
+  },
+  "computer_use.risk.high": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "Action causes permanent data loss, irreversible financial spending, or executes hidden page instructions.",
+     "false": "Reversible edits, minor costs, or data access without external exfiltration or command execution."
+    },
+    {
+     "true": "Operation deletes records permanently, charges a card, or obeys embedded page directives.",
+     "false": "Temporarily modifying data, small transactions, or viewing content without executing external code."
+    },
+    {
+     "true": "Step permanently removes assets, incurs significant expense, or processes malicious page directives.",
+     "false": "Undoable changes, negligible costs, or passive data retrieval without executing external commands."
+    }
+   ]
+  },
+  "context_relevance.keep": {
+   "kind": "yes_no",
+   "variants": [
+    {
+     "true": "The chunk contains specific data, constraints, or context directly required to execute the current active task.",
+     "false": "General background information, past completed steps, or tangential topics that do not influence the immediate next action."
+    },
+    {
+     "true": "Removing this chunk would cause the agent to lose essential instructions, variables, or state needed for the goal.",
+     "false": "Redundant repetition, outdated status updates, or broad summaries that offer no new actionable insight for the current step."
+    },
+    {
+     "true": "The text provides unique, current information that prevents errors or enables progress in the specific ongoing objective.",
+     "false": "Historical logs, irrelevant chit-chat, or duplicate details that do not alter the agent’s current decision-making process."
+    }
+   ]
+  },
+  "context_relevance.priority.low": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "The chunk is redundant, generic, or easily re-derivable, adding no unique context or specific detail.",
+     "false": "The chunk contains unique facts, specific constraints, or critical context necessary for accurate understanding."
+    },
+    {
+     "true": "Removing this chunk leaves no gap in logical flow, meaning, or essential information for the task.",
+     "false": "Removal would cause ambiguity, break necessary chains of reasoning, or lose key definitions or instructions."
+    },
+    {
+     "true": "The content is boilerplate, filler, or trivial data that contributes minimally to the overall message.",
+     "false": "The content is substantive, specific, or pivotal to the argument, decision, or narrative structure."
+    }
+   ]
+  },
+  "context_relevance.priority.medium": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "The chunk provides general context or background information that supports understanding but is not critical for the primary task.",
+     "false": "It contains specific data points, core arguments, or unique insights essential for the final conclusion."
+    },
+    {
+     "true": "Removing this section would leave a minor gap in narrative flow but would not compromise the main argument's integrity.",
+     "false": "Deletion would break logical connections, remove key evidence, or eliminate necessary definitions for the solution."
+    },
+    {
+     "true": "The text serves as supplementary explanation, offering helpful context without driving the core decision or analysis forward.",
+     "false": "It presents pivotal facts, primary objectives, or decisive constraints that directly determine the outcome or validity."
+    }
+   ]
+  },
+  "context_relevance.priority.high": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "Removing this chunk breaks the logical chain, rendering the remaining context incoherent or the primary objective unachievable.",
+     "false": "The chunk supports context, provides background, or adds detail, but the core argument remains intact without it."
+    },
+    {
+     "true": "This chunk contains the sole mechanism, definition, or critical step required to execute the immediate task successfully.",
+     "false": "The chunk offers supplementary information, alternative approaches, or general context that does not hinder progress if removed."
+    },
+    {
+     "true": "The chunk is the irreplaceable pivot point; its absence leaves a gap that prevents any valid conclusion from being drawn.",
+     "false": "The chunk is redundant, illustrative, or explanatory; the essential logic and final answer remain accessible without it."
+    }
+   ]
+  },
+  "context_relevance.role.active_work": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "The chunk contains instructions or code currently being executed to achieve the immediate task objective.",
+     "false": "Background context, historical logs, or deprecated patterns that inform but do not drive the current step."
+    },
+    {
+     "true": "This text represents the immediate next action step or live decision logic for the current workflow.",
+     "false": "Archival documentation, general theory, or obsolete procedures that are no longer applicable to the present state."
+    },
+    {
+     "true": "The content is the primary subject of the current operation, requiring immediate attention or modification.",
+     "false": "Supporting references, past conversation history, or unrelated examples that provide context without requiring action."
+    }
+   ]
+  },
+  "context_relevance.role.reference": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "The chunk provides background context, definitions, or previously established facts needed to interpret the current goal.",
+     "false": "It contains new active steps, outdated information, or results that have been replaced by newer data."
+    },
+    {
+     "true": "It serves as foundational knowledge or a prior result that supports understanding the current task without executing it.",
+     "false": "It describes ongoing actions, obsolete procedures, or superseded findings that no longer apply to the current goal."
+    },
+    {
+     "true": "The text supplies static context or historical results that remain valid and necessary for the current objective.",
+     "false": "It details active work in progress, stale information, or versions that have been explicitly overridden."
+    }
+   ]
+  },
+  "context_relevance.role.stale": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "The task is complete, or the information is outdated and no longer valid for current operations.",
+     "false": "It is actively being worked on, serves as a reference, or was replaced by newer info."
+    },
+    {
+     "true": "The underlying work is finished, or the data is obsolete and no longer applicable to the goal.",
+     "false": "It remains in active use, functions as a reference, or has been superseded by updates."
+    },
+    {
+     "true": "The project is done, or the content is expired and no longer relevant to the current objective.",
+     "false": "It is under active development, used for reference, or overtaken by more recent versions."
+    }
+   ]
+  },
+  "context_relevance.role.superseded": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "Newer session information explicitly invalidates this chunk, making it obsolete for the current goal.",
+     "false": "Chunk remains valid, is merely outdated but not replaced, or lacks direct contradiction by newer data."
+    },
+    {
+     "true": "This chunk has been fully replaced by subsequent context, rendering its previous state irrelevant to the goal.",
+     "false": "Chunk is still active, serves as background reference, or is stale without being explicitly superseded."
+    },
+    {
+     "true": "Subsequent information directly contradicts or updates this chunk, marking it as no longer applicable to the goal.",
+     "false": "Chunk is current, provides necessary context, or is old but not definitively replaced by newer facts."
+    }
+   ]
+  },
+  "context_relevance.handling.verbatim": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "Content relies on exact syntax, identifiers, or sequences where minor changes break functionality or meaning.",
+     "false": "Narrative descriptions, conceptual overviews, or general procedures where paraphrasing preserves intent and accuracy."
+    },
+    {
+     "true": "Text consists of rigid literals like code, URLs, or error codes requiring character-perfect reproduction.",
+     "false": "Explanatory prose, background context, or summaries where specific wording is interchangeable without losing value."
+    },
+    {
+     "true": "Elements are immutable technical artifacts where any deviation causes failure, misinterpretation, or loss of reference.",
+     "false": "Flexible language conveying ideas, steps, or context that can be safely condensed or rephrased."
+    }
+   ]
+  },
+  "context_relevance.handling.summarize": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "The chunk contains redundant context where retaining specific wording adds no value beyond the core meaning.",
+     "false": "The text includes precise data, legal clauses, or unique identifiers where dropping details causes loss of accuracy."
+    },
+    {
+     "true": "The primary intent is to convey the general topic or outcome without preserving exact phrasing or minor details.",
+     "false": "The content requires exact preservation of technical specifications, quotes, or sequential steps where paraphrasing alters the meaning."
+    },
+    {
+     "true": "The information is repetitive or explanatory, allowing the essential point to be captured in fewer words accurately.",
+     "false": "The text contains specific constraints, dates, or unique terminology that must remain unchanged to maintain factual integrity."
+    }
+   ]
+  },
+  "context_relevance.handling.drop": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "The content is pure boilerplate, metadata, or empty filler with zero semantic value to the reader.",
+     "false": "It contains specific data, user intent, or context, even if brief or seemingly redundant."
+    },
+    {
+     "true": "Removing it causes no loss of information, intent, or meaning; it is strictly structural noise.",
+     "false": "It preserves unique facts, timestamps, or conversational flow, requiring retention or condensation."
+    },
+    {
+     "true": "The text consists entirely of system artifacts, formatting tags, or repetitive headers without new content.",
+     "false": "It includes substantive arguments, questions, answers, or narrative elements that define the context."
+    }
+   ]
+  },
+  "insurance_claim.likely_covered": {
+   "kind": "yes_no",
+   "variants": [
+    {
+     "true": "The loss type is explicitly listed in coverage terms, and no specific exclusion clause applies to the facts.",
+     "false": "The loss is implied but not listed, or a standard exclusion like intentional damage or wear applies."
+    },
+    {
+     "true": "The event matches the defined peril scope, and the circumstances do not trigger any listed exclusions.",
+     "false": "The event is adjacent to coverage but distinct, or the facts align with standard voiding conditions."
+    },
+    {
+     "true": "The claim falls within the agreed risk parameters, and no contractual exclusion clause invalidates the claim.",
+     "false": "The claim is outside the defined risk scope, or specific facts match a known policy exclusion pattern."
+    }
+   ]
+  },
+  "insurance_claim.missing_info.nothing": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "All necessary details, including ownership, loss proof, and dates, are present and clear.",
+     "false": "Missing evidence, ownership confirmation, or timeline; or information is vague, incomplete, or contradictory."
+    },
+    {
+     "true": "The claim contains full proof of ownership, loss, and specific dates; no further info needed.",
+     "false": "Lacks valid ownership proof, loss documentation, or exact dates; or details are ambiguous or partial."
+    },
+    {
+     "true": "The text provides complete, unambiguous evidence of ownership, loss, and timing for assessment.",
+     "false": "Evidence is absent, partial, or unclear regarding ownership, loss, or specific dates."
+    }
+   ]
+  },
+  "insurance_claim.missing_info.proof_of_loss": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "The missing item is physical evidence of damage, theft, or theft-related documentation like receipts, photos, or police reports.",
+     "false": "The missing item is ownership records, specific dates of the incident, or simply a lack of any information at all."
+    },
+    {
+     "true": "The assessment is blocked only because tangible incident proof—receipts, images, or official reports—is absent from the claim file.",
+     "false": "The assessment is blocked because ownership verification is missing, the timeline is unclear, or no specific data points are provided."
+    },
+    {
+     "true": "The primary gap is the absence of verifiable incident artifacts, specifically receipts, photographic evidence, or law enforcement documentation.",
+     "false": "The primary gap is the lack of title documents, specific occurrence dates, or any substantive claim details whatsoever."
+    }
+   ]
+  },
+  "insurance_claim.missing_info.proof_of_ownership": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "The claimant lacks evidence establishing their legal title or right to the specific item in question.",
+     "false": "The claimant lacks evidence of how the item was lost, stolen, or damaged, or specific timeline details."
+    },
+    {
+     "true": "The assessment is blocked because there is no documentation proving the claimant actually owned the item.",
+     "false": "The assessment is blocked because the exact date of loss or proof of the loss event itself is missing."
+    },
+    {
+     "true": "The primary gap is establishing the claimant's lawful possession or title to the asset prior to the incident.",
+     "false": "The primary gap is establishing the manner of loss or the specific calendar dates involved in the claim."
+    }
+   ]
+  },
+  "insurance_claim.missing_info.dates": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "The claim lacks specific occurrence dates, making the timeline impossible to verify or establish.",
+     "false": "Dates are present, but evidence of ownership, proof of loss, or other documentation is missing."
+    },
+    {
+     "true": "The primary gap is temporal specificity; we do not know when the event actually took place.",
+     "false": "The timeline is clear, but the claim lacks proof of ownership or substantiation of loss."
+    },
+    {
+     "true": "The assessment is blocked solely because the start and end dates of the incident are unknown.",
+     "false": "Timing is established, but the claim fails due to missing ownership records or loss verification."
+    }
+   ]
+  },
+  "insurance_claim.urgency.routine": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "The issue lacks time-sensitive constraints, immediate impact, or critical deadlines, allowing for standard processing timelines.",
+     "false": "The claim involves imminent deadlines, active service disruption, or high-priority customer demands requiring expedited action."
+    },
+    {
+     "true": "Standard handling procedures apply without risk of significant loss, compliance breach, or operational failure if delayed.",
+     "false": "Delay risks financial loss, legal non-compliance, or critical system downtime, necessitating immediate or near-term resolution."
+    },
+    {
+     "true": "No explicit urgency markers exist, and the matter fits within normal business cycle expectations for resolution.",
+     "false": "Explicit urgency markers like 'ASAP', 'critical', or 'time-sensitive' are present, or external stakeholders demand rapid response."
+    }
+   ]
+  },
+  "insurance_claim.urgency.soon": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "The customer is currently out of pocket or actively blocked from using the service.",
+     "false": "Routine administrative tasks, future planning requests, or issues with no immediate financial impact."
+    },
+    {
+     "true": "Immediate inconvenience exists, such as lost access or unrecovered funds.",
+     "false": "Routine maintenance, standard inquiries, or urgent but non-blocking technical glitches."
+    },
+    {
+     "true": "The situation causes present-day financial loss or prevents essential daily activity.",
+     "false": "Scheduled routine work, general questions, or urgent issues that do not stop usage."
+    }
+   ]
+  },
+  "insurance_claim.urgency.urgent": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "The customer is currently stranded, unsafe, or without shelter due to an immediate service failure.",
+     "false": "Mild inconvenience, future travel issues, or minor delays where the customer remains safe and housed."
+    },
+    {
+     "true": "Immediate physical safety, housing loss, or total inability to move the customer is currently occurring.",
+     "false": "Discomfort, financial loss, or scheduled disruptions that do not pose immediate danger or homelessness."
+    },
+    {
+     "true": "The situation poses an imminent threat to the customer's safety, housing, or ability to travel right now.",
+     "false": "Routine inconveniences, planned delays, or issues resolvable in hours without compromising basic safety or shelter."
+    }
+   ]
+  },
+  "log_triage.page_oncall": {
+   "kind": "yes_no",
+   "variants": [
+    {
+     "true": "Active degradation is occurring now, causing immediate loss of service, data, or revenue for live users.",
+     "false": "Planned maintenance, isolated test failures, or warnings without current user impact, which can wait for business hours."
+    },
+    {
+     "true": "A live incident is actively blocking core workflows or corrupting data, requiring immediate human intervention to stop harm.",
+     "false": "Transient spikes, non-critical alerts, or issues affecting only internal developers, which do not require immediate on-call action."
+    },
+    {
+     "true": "Users are experiencing broken functionality or data loss right now, demanding urgent mitigation to prevent further damage.",
+     "false": "Stable system metrics, minor cosmetic bugs, or issues queued for the next release cycle, which are not urgent."
+    }
+   ]
+  },
+  "log_triage.severity.none": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "Logs show standard activity like successful requests or routine background tasks with no errors or warnings.",
+     "false": "Logs contain minor warnings, transient network timeouts, or non-critical deprecation notices that do not halt service."
+    },
+    {
+     "true": "Every logged event is informational, confirming normal state changes or successful completions without any anomaly codes.",
+     "false": "Logs include recoverable exceptions, resource usage spikes, or failed retries that trigger automatic recovery mechanisms."
+    },
+    {
+     "true": "The log stream reflects expected baseline behavior with zero error-level or warning-level entries present.",
+     "false": "Logs show intermittent latency spikes, minor configuration mismatches, or non-fatal dependency warnings that remain unresolved."
+    }
+   ]
+  },
+  "log_triage.severity.low": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "The log indicates a temporary, self-resolving glitch requiring no human intervention or user-visible impact.",
+     "false": "The event shows persistent errors, data loss, or requires manual restarts, exceeding minor noise."
+    },
+    {
+     "true": "The issue is transient and self-healing, with no lasting negative effect on system functionality or data.",
+     "false": "The log reveals ongoing instability, performance degradation, or failures that persist beyond initial detection."
+    },
+    {
+     "true": "The log reflects a benign, isolated anomaly that resolves automatically without disrupting service or users.",
+     "false": "The entry describes recurring faults, resource exhaustion, or operational blocks that prevent normal processing."
+    }
+   ]
+  },
+  "log_triage.severity.high": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "Users face broken workflows, data loss, or significant performance drops, but the system remains partially responsive.",
+     "false": "Complete system failure, minor cosmetic glitches, or purely internal background noise without user impact."
+    },
+    {
+     "true": "Service degradation is noticeable to end-users, such as slow responses or intermittent errors, yet core features still work.",
+     "false": "Total outage, trivial UI issues, or negligible latency that does not impede user tasks."
+    },
+    {
+     "true": "The incident impairs user experience significantly, causing frustration or workarounds, but does not completely shut down services.",
+     "false": "Hard down, insignificant visual bugs, or minor performance hiccups that leave user operations unaffected."
+    }
+   ]
+  },
+  "log_triage.severity.critical": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "Services are completely down, or user data is actively being lost, corrupted, or permanently deleted.",
+     "false": "Services are degraded, slow, or unavailable for a subset of users without data loss."
+    },
+    {
+     "true": "Total production outage occurs, or irrecoverable data corruption is confirmed, affecting core business functions.",
+     "false": "Intermittent errors, performance drops, or localized failures where data remains intact and services partially function."
+    },
+    {
+     "true": "System is entirely inaccessible, or data integrity is compromised such that records are lost or unrecoverable.",
+     "false": "High-severity issues like latency spikes, partial outages, or errors that do not result in data loss."
+    }
+   ]
+  },
+  "log_triage.signal.none": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "The input contains zero complaints regarding failed operations, slow responses, resource exhaustion, or credential rejections. All reported items are informational.",
+     "false": "Any mention of crashes, timeouts, high CPU usage, or login failures, even if minor or resolved, invalidates this status."
+    },
+    {
+     "true": "No user reports errors, delays, capacity limits, or access denials. The narrative describes normal functioning or neutral observations only.",
+     "false": "Presence of exception logs, sluggish performance, queue buildup, or authentication blocks, regardless of severity, prevents a yes answer."
+    },
+    {
+     "true": "The text lacks indicators of broken requests, high response times, maxed-out resources, or rejected tokens. It reflects a steady, healthy state.",
+     "false": "References to 5xx codes, latency spikes, memory limits, or 401/403 responses, even as historical context, disqualify the classification."
+    }
+   ]
+  },
+  "log_triage.signal.errors": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "The primary issue is abnormal failure rates, crash logs, or unexpected exception spikes.",
+     "false": "High response times, resource exhaustion, access denials, or no reported issues."
+    },
+    {
+     "true": "System behavior indicates unhandled exceptions, crash dumps, or significant error rate increases.",
+     "false": "Slow performance, maxed-out CPU/memory, auth failures, or stable operations."
+    },
+    {
+     "true": "Diagnostic data highlights frequent 5xx responses, stack traces, or application crashes.",
+     "false": "Elevated latency, saturation warnings, permission errors, or baseline normalcy."
+    }
+   ]
+  },
+  "log_triage.signal.latency": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "The core complaint is slow response times, hanging requests, or excessive wait times before data arrives.",
+     "false": "Failures due to error codes, resource exhaustion, authentication failures, or missing data are not latency."
+    },
+    {
+     "true": "Users perceive the system as unresponsive, stalled, or taking significantly longer than expected to return results.",
+     "false": "Immediate failures, permission denials, 5xx errors, or total service outages are distinct from latency issues."
+    },
+    {
+     "true": "The primary pain point is delayed processing, slow queries, or timeout occurrences rather than functional breakdowns.",
+     "false": "Crashes, validation errors, quota limits, or login issues are separate categories, not merely slow responses."
+    }
+   ]
+  },
+  "log_triage.signal.saturation": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "Performance is limited by resource exhaustion, such as CPU, memory, disk, or network capacity.",
+     "false": "Issues stem from application errors, slow responses without resource limits, or authentication failures."
+    },
+    {
+     "true": "System throughput is capped by hardware or infrastructure limits, preventing further demand handling.",
+     "false": "Problems involve logical errors, high latency independent of resource caps, or credential rejections."
+    },
+    {
+     "true": "The primary bottleneck is hitting maximum capacity for processing, storage, or connection slots.",
+     "false": "The cause is software bugs, response delays not tied to capacity, or access control issues."
+    }
+   ]
+  },
+  "log_triage.signal.auth": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "The core issue is failed login, expired credentials, or denied access due to missing permissions.",
+     "false": "Access works, but requests fail due to application bugs, timeouts, or resource exhaustion."
+    },
+    {
+     "true": "The blocker is identity verification or authorization checks rejecting valid or invalid user identities.",
+     "false": "The blocker is system crashes, slow responses, or capacity limits despite successful authentication."
+    },
+    {
+     "true": "The primary fault is the inability to prove identity or lack of granted rights.",
+     "false": "The primary fault is logic errors, high latency, or infrastructure saturation after authentication succeeds."
+    }
+   ]
+  },
+  "support_thread.resolved": {
+   "kind": "yes_no",
+   "variants": [
+    {
+     "true": "Customer confirms the fix works and confirms they have no outstanding requests or pending follow-ups.",
+     "false": "Customer remains silent, is waiting for a refund, or is still testing the solution without confirmation."
+    },
+    {
+     "true": "The issue is closed because the customer states the solution is successful and no further action is needed.",
+     "false": "The customer is still troubleshooting, awaiting a response, or has expressed doubt about whether the problem is fixed."
+    },
+    {
+     "true": "The customer explicitly validates the resolution and indicates the conversation can end without further vendor support.",
+     "false": "The customer is passive, has not verified the fix, or is still expecting a callback or additional update."
+    }
+   ]
+  },
+  "support_thread.escalate": {
+   "kind": "yes_no",
+   "variants": [
+    {
+     "true": "Customer is stuck on a blocked process, has contacted multiple times, or is visibly angry or high-value.",
+     "false": "Customer is frustrated but making progress, has not contacted before, and is not high-value or threatening."
+    },
+    {
+     "true": "Interaction is stalled due to system blocks, involves repeated outreach, or features anger and significant account value.",
+     "false": "Customer is mildly annoyed but moving forward, is a first-time contact, and lacks high-value status or threats."
+    },
+    {
+     "true": "Customer cannot proceed due to errors, has repeated the issue, or shows intense anger or holds a high-tier account.",
+     "false": "Customer is slightly upset but resolving, is a new contact, and does not hold high-tier status or escalate."
+    }
+   ]
+  },
+  "support_thread.mood.happy": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "The customer expresses active delight, thanks the agent, or uses cheerful, upbeat language without reservation.",
+     "false": "The customer is merely polite, silent, or relieved after a fix, lacking explicit enthusiasm or positive sentiment."
+    },
+    {
+     "true": "The tone is distinctly positive, showing satisfaction or joy, rather than just accepting the outcome.",
+     "false": "The customer is passive, indifferent, or simply stating facts, without expressing genuine emotional pleasure or warmth."
+    },
+    {
+     "true": "The interaction ends with clear appreciation, laughter, or a friendly, warm closing sentiment from the customer.",
+     "false": "The customer stops talking abruptly, remains silent, or gives a flat, unenthusiastic acknowledgment of the resolution."
+    }
+   ]
+  },
+  "support_thread.mood.neutral": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "The customer uses standard, factual language with no emotional emphasis, excitement, or complaint about the situation.",
+     "false": "The customer shows visible irritation, uses aggressive words, or expresses relief and satisfaction beyond basic acknowledgement."
+    },
+    {
+     "true": "Communication is purely transactional, lacking exclamation marks, sarcasm, or any indication of positive or negative sentiment.",
+     "false": "The tone includes underlying tension, enthusiasm, or dissatisfaction, even if the words themselves appear polite or standard."
+    },
+    {
+     "true": "The interaction remains flat and objective, focusing solely on information exchange without any emotional coloring or urgency.",
+     "false": "The customer displays subtle frustration, hidden anger, or noticeable happiness, deviating from a strictly detached, informational state."
+    }
+   ]
+  },
+  "support_thread.mood.frustrated": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "The customer expresses annoyance, irritability, or exasperation regarding a specific issue or delay.",
+     "false": "The customer is calm, polite, or explicitly angry with shouting and insults."
+    },
+    {
+     "true": "The tone indicates weariness, impatience, or dissatisfaction with the process or outcome.",
+     "false": "The tone is purely neutral, positive, or characterized by aggressive hostility."
+    },
+    {
+     "true": "The customer complains about inefficiency or bad service with a tone of exasperation.",
+     "false": "The customer is indifferent, cheerful, or shouting in uncontrolled rage."
+    }
+   ]
+  },
+  "support_thread.mood.angry": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "Customer uses profanity, insults, or expresses active rage, hostility, or intense anger toward the service or staff.",
+     "false": "Customer is merely frustrated, disappointed, or using strong language without overt hostility or rage."
+    },
+    {
+     "true": "The tone is aggressive, screaming, or explicitly hostile, indicating a desire to vent anger rather than solve a problem.",
+     "false": "The tone is tense, impatient, or annoyed, but remains focused on problem-solving or requests."
+    },
+    {
+     "true": "Language includes threats, personal attacks, or extreme emotional outbursts that cross into hostility or rage.",
+     "false": "Language is stern, critical, or exasperated, but lacks the personal aggression or rage of true anger."
+    }
+   ]
+  },
+  "phishing.threat": {
+   "kind": "yes_no",
+   "variants": [
+    {
+     "true": "Sends deceptive links, requests credentials or money, or uses fake urgency to bypass security controls.",
+     "false": "Legitimate service notifications, automated alerts, or standard marketing emails asking users to log in securely."
+    },
+    {
+     "true": "Misrepresents sender identity or purpose to extract sensitive data, funds, or access via fraudulent mechanisms.",
+     "false": "Genuine corporate communications, billing statements, or newsletters that require standard authentication for account management."
+    },
+    {
+     "true": "Creates false pretext to trick recipients into revealing secrets, paying fraudulently, or executing malicious payloads.",
+     "false": "Routine administrative emails, subscription confirmations, or urgent but authentic system maintenance notices from verified sources."
+    }
+   ]
+  },
+  "phishing.safe": {
+   "kind": "yes_no",
+   "variants": [
+    {
+     "true": "The message informs, invites, or requests action on a service the recipient actually uses without demanding secrets.",
+     "false": "It pressures for immediate password entry, payment details, or clicks on disguised external URLs to bypass standard security."
+    },
+    {
+     "true": "Standard notifications or newsletters that prompt sign-in or updates for existing accounts, even if time-sensitive or automated.",
+     "false": "Deceptive traps using urgency, fear, or fake identities to extract login credentials, funds, or private information."
+    },
+    {
+     "true": "Genuine correspondence or service alerts that direct users to their own verified platforms for routine account management.",
+     "false": "Phishing attempts that spoof trusted brands to coerce immediate data submission or execution of malicious links."
+    }
+   ]
   }
  }
 }

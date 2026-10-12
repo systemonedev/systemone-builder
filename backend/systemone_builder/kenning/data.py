@@ -21,6 +21,7 @@ from typing import Any
 
 import httpx
 
+from systemone_builder.kenning import criteria
 from systemone_builder.system_one.bench import PHISHING_DATASET, _hf_rows
 
 MALICIOUS_QUESTIONS = [
@@ -47,6 +48,13 @@ CHOICE_SETS = [
 ]
 SAFE_OPTION = {"Safe", "Legitimate", "Deliver", "Benign"}
 
+# The two sides of the phishing decision, as criteria. The "safe" side deliberately names the hard
+# false positives: real notices are often urgent, automated, and do ask the reader to sign in.
+THREAT_CRITERION = ("It tries to deceive the reader into handing over credentials, money or data, "
+                    "or into opening a link that is not what it claims to be.")
+SAFE_CRITERION = ("Ordinary correspondence, a notice or a newsletter, even where it is urgent, "
+                  "automated, or asks the reader to sign in to a service they really use.")
+
 
 def body_hash(text: str) -> str:
     return hashlib.sha256(text.strip()[:1500].encode()).hexdigest()
@@ -65,10 +73,12 @@ def questions_for(rng: random.Random, malicious: bool) -> tuple[dict[str, Any], 
     qs: dict[str, Any] = {}
     targets: dict[str, Any] = {}
     if rng.random() < 0.75:
-        qs["q_threat"] = {"type": "noul", "instructions": rng.choice(MALICIOUS_QUESTIONS)}
+        qs["q_threat"] = criteria.noul(rng, rng.choice(MALICIOUS_QUESTIONS),
+                                       THREAT_CRITERION, SAFE_CRITERION, key="phishing.threat")
         targets["q_threat"] = int(malicious)
-    else:
-        qs["q_safe"] = {"type": "noul", "instructions": rng.choice(SAFE_QUESTIONS)}
+    else:  # same decision asked the other way round, so the criteria swap sides
+        qs["q_safe"] = criteria.noul(rng, rng.choice(SAFE_QUESTIONS),
+                                     SAFE_CRITERION, THREAT_CRITERION, key="phishing.safe")
         targets["q_safe"] = int(not malicious)
     instr, crit = rng.choice(CHOICE_SETS)
     items = list(crit.items())

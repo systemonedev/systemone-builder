@@ -129,3 +129,67 @@ def test_missing_variants_file_is_not_an_error(tmp_path, monkeypatch):
         assert q["criteria"] == {"true": "Yes side.", "false": "No side."}
     finally:
         criteria._variants.cache_clear()
+
+
+def test_phishing_asks_the_same_decision_both_ways_and_swaps_the_criteria(tmp_path, monkeypatch):
+    """q_threat and q_safe are the same decision inverted, so the two sides must swap."""
+    from systemone_builder.kenning import data as phishing_data
+
+    # isolate from the shipped teacher variants: this is about the polarity logic
+    monkeypatch.setattr(criteria, "VARIANTS_FILE", tmp_path / "absent.json")
+    criteria._variants.cache_clear()
+    try:
+        threat = safe = 0
+        for seed in range(80):
+            qs, targets = phishing_data.questions_for(random.Random(seed), malicious=True)
+            if "q_threat" in qs and qs["q_threat"].get("criteria"):
+                c = qs["q_threat"]["criteria"]
+                assert c["true"] == phishing_data.THREAT_CRITERION
+                assert c["false"] == phishing_data.SAFE_CRITERION
+                threat += 1
+            if "q_safe" in qs and qs["q_safe"].get("criteria"):
+                c = qs["q_safe"]["criteria"]
+                assert c["true"] == phishing_data.SAFE_CRITERION
+                assert c["false"] == phishing_data.THREAT_CRITERION
+                safe += 1
+        assert threat and safe, "both phrasings should appear across 80 seeds"
+    finally:
+        criteria._variants.cache_clear()
+
+
+def test_safe_criterion_names_the_hard_false_positives():
+    """Urgent, automated, sign-in-requesting mail is the FP class that matters; say so explicitly."""
+    from systemone_builder.kenning.data import SAFE_CRITERION
+
+    low = SAFE_CRITERION.lower()
+    assert "urgent" in low and "automated" in low and "sign in" in low
+
+
+def test_problem_rows_carry_criteria():
+    """problems.py reuses synthetic_tasks.questions_for, keyed by problem name."""
+    from systemone_builder.kenning.problems import builtin_problems, training_rows
+
+    seen_noul = seen_criteria = 0
+    for name, p in builtin_problems().items():
+        cases = [{"state": {"x": "..."}, "labels": {a.name: list(a.labels)[0] for a in p.attrs}}
+                 for _ in range(12)]
+        for row in training_rows(p, cases, seed=3):
+            for q in row["questions"].values():
+                if q["type"] != "noul":
+                    continue
+                Question.model_validate(q)
+                seen_noul += 1
+                if q.get("criteria"):
+                    seen_criteria += 1
+                    assert set(q["criteria"]) == {"true", "false"}
+    assert seen_noul, "no problem produced a noul question"
+    assert seen_criteria, "no problem noul question carried criteria"
+
+
+def test_every_generator_template_key_has_teacher_variants():
+    """A key typo would silently fall back to the terse text, so pin the coverage."""
+    from systemone_builder.kenning.enrich_criteria import templates
+
+    criteria._variants.cache_clear()
+    missing = sorted(t["key"] for t in templates() if not criteria.variants_for(t["key"]))
+    assert not missing, f"templates with no teacher variants: {missing[:10]} ({len(missing)} total)"

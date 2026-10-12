@@ -73,26 +73,48 @@ Worked example for a different question:
 """
 
 
+def _attr_templates(group: str, attrs: Any) -> list[dict[str, Any]]:
+    """The noul shapes one task or problem can emit, keyed <group>.<attr>[.<label>]."""
+    out: list[dict[str, Any]] = []
+    for attr in attrs:
+        names = list(attr.labels)
+        instr = attr.question[0]
+        if set(names) == {"yes", "no"}:
+            out.append({"key": f"{group}.{attr.name}", "kind": "yes_no", "question": instr,
+                        "yes": attr.labels["yes"] or "yes", "no": attr.labels["no"] or "no"})
+            continue
+        for label in names:
+            others = [n for n in names if n != label][:4]
+            desc = attr.labels[label]
+            out.append({
+                "key": f"{group}.{attr.name}.{label}", "kind": "label",
+                "question": f"{instr.rstrip('?')} - is the answer \"{label}\"?",
+                "yes": f"it is {label}" + (f" ({desc})" if desc else ""),
+                "no": "it is one of the other options: " + ", ".join(others),
+            })
+    return out
+
+
 def templates() -> list[dict[str, Any]]:
     """Every noul question shape the generators can emit, with the descriptions we already have."""
     out: list[dict[str, Any]] = []
     for task in TASKS:
-        for attr in task.attrs:
-            names = list(attr.labels)
-            instr = attr.question[0]
-            if set(names) == {"yes", "no"}:
-                out.append({"key": f"{task.name}.{attr.name}", "kind": "yes_no", "question": instr,
-                            "yes": attr.labels["yes"], "no": attr.labels["no"]})
-                continue
-            for label in names:
-                others = [n for n in names if n != label][:4]
-                desc = attr.labels[label]
-                out.append({
-                    "key": f"{task.name}.{attr.name}.{label}", "kind": "label",
-                    "question": f"{instr.rstrip('?')} - is the answer \"{label}\"?",
-                    "yes": f"it is {label}" + (f" ({desc})" if desc else ""),
-                    "no": "it is one of the other options: " + ", ".join(others),
-                })
+        out += _attr_templates(task.name, task.attrs)
+    # the bring-your-own-problem generator reuses synthetic_tasks.questions_for, keyed by problem name
+    try:
+        from systemone_builder.kenning.problems import builtin_problems
+        for name, problem in builtin_problems().items():
+            out += _attr_templates(name, problem.attrs)
+    except Exception as exc:  # a malformed problem file must not block the rest
+        print(f"  ! builtin problems skipped: {type(exc).__name__}: {exc}", file=sys.stderr)
+    # the phishing generator asks the same decision both ways round
+    from systemone_builder.kenning.data import SAFE_CRITERION, THREAT_CRITERION
+    out.append({"key": "phishing.threat", "kind": "yes_no",
+                "question": "Is this email a phishing attempt, scam or other security threat?",
+                "yes": THREAT_CRITERION, "no": SAFE_CRITERION})
+    out.append({"key": "phishing.safe", "kind": "yes_no",
+                "question": "Is this a legitimate, safe email?",
+                "yes": SAFE_CRITERION, "no": THREAT_CRITERION})
     return out
 
 
@@ -112,8 +134,13 @@ def valid(variant: dict[str, Any]) -> bool:
 
 async def enrich(base_url: str, model: str, n_variants: int, concurrency: int = 4,
                  api_key: str | None = None, timeout: float = 600,
-                 limit: int | None = None, reasoning_effort: str | None = "none") -> dict[str, Any]:
+                 limit: int | None = None, reasoning_effort: str | None = "none",
+                 skip: set[str] | None = None) -> dict[str, Any]:
     tmpls = templates()[:limit] if limit else templates()
+    if skip:
+        before = len(tmpls)
+        tmpls = [t for t in tmpls if t["key"] not in skip]
+        print(f"  {before - len(tmpls)} template(s) already written, {len(tmpls)} to do", file=sys.stderr)
     sem = asyncio.Semaphore(concurrency)
     headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
     done = 0
@@ -159,20 +186,30 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--concurrency", type=int, default=4)
     p.add_argument("--out", type=Path, default=VARIANTS_FILE)
     p.add_argument("--limit", type=int, default=None, help="only the first N templates (for a trial run)")
+    p.add_argument("--force", action="store_true",
+                   help="rewrite templates already present in --out instead of keeping them")
     p.add_argument("--reasoning-effort", default="none",
                    help='sent as reasoning_effort; a reasoning teacher otherwise returns no content. '
                         'Pass "" to omit the field for providers that reject it.')
     a = p.parse_args(argv)
 
+    existing: dict[str, Any] = {}
+    if a.out.exists() and not a.force:
+        try:
+            existing = json.loads(a.out.read_text(encoding="utf-8")).get("criteria") or {}
+        except ValueError:
+            existing = {}
     got = asyncio.run(enrich(a.base_url, a.model, a.variants, a.concurrency, limit=a.limit,
-                             reasoning_effort=a.reasoning_effort or None))
-    total = sum(len(v["variants"]) for v in got.values())
+                             reasoning_effort=a.reasoning_effort or None,
+                             skip=set(existing) if existing else None))
+    merged = {**existing, **got}
+    total = sum(len(v["variants"]) for v in merged.values())
     doc = {"version": 1, "teacher": a.model, "max_words": MAX_WORDS,
            "note": "Written offline by a local teacher; see kenning/enrich_criteria.py.",
-           "criteria": got}
+           "criteria": merged}
     a.out.write_text(json.dumps(doc, indent=1, ensure_ascii=False), encoding="utf-8")
-    print(f"\n{len(got)} templates, {total} variants -> {a.out}")
-    return 0 if got else 1
+    print(f"\n{len(merged)} templates ({len(got)} new), {total} variants -> {a.out}")
+    return 0 if merged else 1
 
 
 if __name__ == "__main__":

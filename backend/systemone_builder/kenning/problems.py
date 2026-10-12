@@ -271,7 +271,8 @@ async def write_cases(p: Problem, n: int, seed: int, base_url: str, model: str, 
 # ------------------------------------------------------------------ rows and hold-out
 def training_rows(p: Problem, cases: list[dict[str, Any]], seed: int) -> list[dict[str, Any]]:
     rng = random.Random(f"problem-rows-{p.name}-{seed}")
-    return [{"state": c["state"], **questions_for(p.attrs, c["labels"], rng)} for c in cases]
+    # the problem name keys this problem's teacher-written criteria variants
+    return [{"state": c["state"], **questions_for(p.attrs, c["labels"], rng, p.name)} for c in cases]
 
 
 def canonical_questions(p: Problem) -> dict[str, dict[str, Any]]:
