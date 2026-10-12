@@ -149,8 +149,32 @@ class Kenning:
         self.chunk = chunk
         self._lock = threading.Lock()
 
-    def scores(self, premise: str, hyps: list[str]) -> tuple[list[float], int]:
-        """Pair scores for one premise and many hypotheses, plus input tokens used."""
+    def _tok_len(self, text: str) -> int:
+        return len(self.tokenizer(text, add_special_tokens=False)["input_ids"])
+
+    def premises_for(self, premise: str, groups: list[tuple[str, Question, list[Any], int, int]],
+                     hyps: list[str]) -> list[str]:
+        """One premise per hypothesis, truncated to a budget shared by every option of its question.
+
+        ``truncation="only_first"`` trims the premise to whatever room each hypothesis leaves, so a
+        long option description would see less of the state than a short one -- and the group's
+        softmax would then compare scores taken over different evidence. Budgeting per question
+        keeps every option on identical evidence and makes the answer independent of how verbosely
+        the options happen to be written.
+        """
+        specials = self.tokenizer.num_special_tokens_to_add(pair=True)
+        prem_ids = self.tokenizer(premise, add_special_tokens=False)["input_ids"]
+        prems: list[str] = [premise] * len(hyps)
+        for _qid, _q, _options, start, n in groups:
+            budget = max(0, self.max_length - specials - max(self._tok_len(h) for h in hyps[start:start + n]))
+            text = (premise if len(prem_ids) <= budget
+                    else self.tokenizer.decode(prem_ids[:budget], skip_special_tokens=True))
+            for j in range(start, start + n):
+                prems[j] = text
+        return prems
+
+    def scores(self, premises: list[str], hyps: list[str]) -> tuple[list[float], int]:
+        """Pair scores for aligned premises and hypotheses, plus input tokens used."""
         import torch
 
         out: list[float] = []
@@ -158,8 +182,8 @@ class Kenning:
         with torch.inference_mode():
             for i in range(0, len(hyps), self.chunk):
                 part = hyps[i:i + self.chunk]
-                enc = self.tokenizer([premise] * len(part), part, truncation="only_first", max_length=self.max_length,
-                                     padding=True, return_tensors="pt").to(self.device)
+                enc = self.tokenizer(premises[i:i + self.chunk], part, truncation="only_first",
+                                     max_length=self.max_length, padding=True, return_tensors="pt").to(self.device)
                 tokens += int(enc["attention_mask"].sum())
                 logits = self.model(**enc).logits
                 out.extend(pair_scores(self.model, logits, self.positive_index).tolist())
@@ -175,7 +199,7 @@ class Kenning:
             groups.append((qid, q, options, len(hyps), len(texts)))
             hyps.extend(texts)
         with self._lock:
-            flat, tokens = self.scores(premise, hyps)
+            flat, tokens = self.scores(self.premises_for(premise, groups, hyps), hyps)
         answers: dict[str, Any] = {}
         for qid, q, options, start, n in groups:
             t = self.temperature.get(q.type, 1.0)
