@@ -8,6 +8,7 @@ receive the whole criteria blob, leaving them identical apart from "yes."/"no.".
 
 from __future__ import annotations
 
+import json
 import random
 
 from systemone_builder.kenning import criteria
@@ -70,7 +71,7 @@ def test_generated_tasks_mix_criteria_presence():
         rng = random.Random(seed)
         for task in TASKS:
             labels = {a.name: rng.choice(list(a.labels)) for a in task.attrs}
-            out = questions_for(task.attrs, labels, rng)
+            out = questions_for(task.attrs, labels, rng, task.name)
             for q in out["questions"].values():
                 if q["type"] != "noul":
                     continue
@@ -91,8 +92,40 @@ def test_generated_criteria_always_discriminate():
         rng = random.Random(seed)
         for task in TASKS:
             labels = {a.name: rng.choice(list(a.labels)) for a in task.attrs}
-            for q in questions_for(task.attrs, labels, rng)["questions"].values():
+            for q in questions_for(task.attrs, labels, rng, task.name)["questions"].values():
                 if q["type"] != "noul" or not q.get("criteria"):
                     continue
                 yes, no = hypotheses(Question.model_validate(q))[0]
                 assert yes.replace("Answer: yes.", "") != no.replace("Answer: no.", "")
+
+
+def test_teacher_variants_are_used_when_present(tmp_path, monkeypatch):
+    """A template with teacher-written variants uses one instead of the terse description."""
+    f = tmp_path / "criteria_variants.json"
+    f.write_text(json.dumps({"version": 1, "criteria": {"demo.attr": {"kind": "yes_no", "variants": [
+        {"true": "A deadline, travel date or payment due date is named.",
+         "false": "Only general impatience, with no date or deadline given."}]}}}), encoding="utf-8")
+    monkeypatch.setattr(criteria, "VARIANTS_FILE", f)
+    criteria._variants.cache_clear()
+    try:
+        q = criteria.noul(random.Random(0), "Is it urgent?", "terse yes", "terse no",
+                          present=1.0, key="demo.attr")
+        assert q["criteria"]["true"].startswith("A deadline, travel date")
+        assert "terse" not in json.dumps(q)
+        # an unknown key still falls back to the generator's own descriptions
+        other = criteria.noul(random.Random(0), "Is it urgent?", "terse yes", "terse no",
+                              present=1.0, key="nope.missing")
+        assert other["criteria"] == {"true": "Terse yes.", "false": "Terse no."}
+    finally:
+        criteria._variants.cache_clear()
+
+
+def test_missing_variants_file_is_not_an_error(tmp_path, monkeypatch):
+    monkeypatch.setattr(criteria, "VARIANTS_FILE", tmp_path / "absent.json")
+    criteria._variants.cache_clear()
+    try:
+        assert criteria.variants_for("anything") == []
+        q = criteria.noul(random.Random(0), "Is it urgent?", "yes side", "no side", present=1.0)
+        assert q["criteria"] == {"true": "Yes side.", "false": "No side."}
+    finally:
+        criteria._variants.cache_clear()

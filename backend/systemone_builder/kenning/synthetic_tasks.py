@@ -122,11 +122,16 @@ def _prompt(task: Task, labels: dict[str, str], style: str) -> str:
 
 def rows_for(task: Task, text: str, labels: dict[str, str], rng: random.Random) -> dict[str, Any]:
     """Questions for one generated text, with targets from the requested labels."""
-    return {"state": {task.state_key: text}, **questions_for(task.attrs, labels, rng)}
+    return {"state": {task.state_key: text}, **questions_for(task.attrs, labels, rng, task.name)}
 
 
-def questions_for(attrs: list[Attr], labels: dict[str, str], rng: random.Random) -> dict[str, Any]:
-    """Varied questions about one case (noul, choice, score or "is it X?"), with targets from its labels."""
+def questions_for(attrs: list[Attr], labels: dict[str, str], rng: random.Random,
+                  task: str | None = None) -> dict[str, Any]:
+    """Varied questions about one case (noul, choice, score or "is it X?"), with targets from its labels.
+
+    ``task`` names the task so noul questions can pick up the teacher-written criteria variants
+    keyed ``<task>.<attr>`` and ``<task>.<attr>.<label>`` (see :mod:`kenning.enrich_criteria`).
+    """
     qs: dict[str, Any] = {}
     targets: dict[str, Any] = {}
     for attr in attrs:
@@ -134,7 +139,8 @@ def questions_for(attrs: list[Attr], labels: dict[str, str], rng: random.Random)
         names = list(attr.labels)
         instr = rng.choice(attr.question)
         if set(names) == {"yes", "no"}:
-            qs[attr.name] = criteria.noul(rng, instr, attr.labels.get("yes"), attr.labels.get("no"))
+            qs[attr.name] = criteria.noul(rng, instr, attr.labels.get("yes"), attr.labels.get("no"),
+                                          key=f"{task}.{attr.name}" if task else None)
             targets[attr.name] = int(truth == "yes")
         elif attr.ordinal and rng.random() < 0.6:
             qs[attr.name] = {"type": "score", "instructions": instr,
@@ -149,7 +155,8 @@ def questions_for(attrs: list[Attr], labels: dict[str, str], rng: random.Random)
         else:  # "is it X?" with the true or a wrong label, half and half
             ask = truth if rng.random() < 0.5 else rng.choice([n for n in names if n != truth])
             qs[attr.name] = criteria.about_label(rng, f"{instr.rstrip('?')} - is the answer \"{ask}\"?",
-                                                 ask, attr.labels.get(ask), names)
+                                                 ask, attr.labels.get(ask), names,
+                                                 key=f"{task}.{attr.name}.{ask}" if task else None)
             targets[attr.name] = int(ask == truth)
     return {"questions": qs, "targets": targets}
 

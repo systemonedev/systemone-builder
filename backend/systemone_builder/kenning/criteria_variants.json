@@ -1,0 +1,1215 @@
+{
+ "version": 1,
+ "teacher": "qwen3.8:27b",
+ "max_words": 25,
+ "note": "Written offline by a local teacher; see kenning/enrich_criteria.py.",
+ "criteria": {
+  "support_ticket.department.billing": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "The request concerns payment processing, invoice errors, refunds, or plan pricing adjustments.",
+     "false": "It involves login failures, feature requests, sales inquiries, or general product feedback."
+    },
+    {
+     "true": "The issue centers on monetary transactions, billing statements, or subscription cost changes.",
+     "false": "It addresses account access, technical bugs, new business opportunities, or user suggestions."
+    },
+    {
+     "true": "The ticket requires resolving charges, credit notes, or invoice discrepancies related to paid services.",
+     "false": "It covers account management, software glitches, prospect questions, or non-monetary user opinions."
+    }
+   ]
+  },
+  "support_ticket.department.technical": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "The issue concerns software defects, unexpected errors, service outages, or integration failures requiring code-level debugging.",
+     "false": "The request involves payment disputes, account access changes, sales inquiries, or general product suggestions lacking technical failure."
+    },
+    {
+     "true": "The ticket describes a malfunction, crash, or broken connection preventing normal system operation or data flow.",
+     "false": "The request concerns billing adjustments, profile updates, pricing questions, or feature requests without active system errors."
+    },
+    {
+     "true": "The core problem is a failure in code execution, API connectivity, or system stability requiring engineering intervention.",
+     "false": "The query relates to financial transactions, user account management, commercial offers, or non-critical user feedback."
+    }
+   ]
+  },
+  "support_ticket.department.account": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "Ticket involves access credentials, identity verification, account deletion, or profile data modification.",
+     "false": "Requests concern payment processing, software bugs, purchase inquiries, or general product suggestions."
+    },
+    {
+     "true": "User needs help logging in, resetting security details, updating personal information, or closing their profile.",
+     "false": "Issues relate to invoice disputes, application errors, sales negotiations, or user experience feedback."
+    },
+    {
+     "true": "Core issue is managing user identity, authentication status, or personal data settings on the platform.",
+     "false": "Matters involve financial transactions, technical system failures, commercial sales requests, or non-account-related complaints."
+    }
+   ]
+  },
+  "support_ticket.department.sales": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "The inquiry seeks pricing details, upgrade options, or formal quotes for new or existing services.",
+     "false": "Requests concern past invoices, payment failures, technical errors, account access, or general product feedback."
+    },
+    {
+     "true": "The user asks about costs, plans, or purchasing decisions related to adding or changing service tiers.",
+     "false": "The issue is resolving billing errors, fixing bugs, managing profile settings, or submitting user opinions."
+    },
+    {
+     "true": "The ticket requests commercial information like rates, subscriptions, or sales proposals for service acquisition.",
+     "false": "The request addresses existing account management, technical troubleshooting, invoice disputes, or non-transactional feedback."
+    }
+   ]
+  },
+  "support_ticket.department.feedback": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "User offers praise, feature requests, or general comments without reporting errors, billing issues, or account access problems.",
+     "false": "User reports broken functionality, disputes charges, requests password resets, or asks for pricing details and contract terms."
+    },
+    {
+     "true": "Content consists solely of suggestions, compliments, or observations, lacking any request to fix, refund, change, or sell.",
+     "false": "Content demands technical repairs, financial corrections, account modifications, or commercial sales support, even if politely phrased."
+    },
+    {
+     "true": "The ticket contains no actionable defects, payment disputes, login failures, or purchase inquiries, only subjective opinions or ideas.",
+     "false": "The ticket explicitly cites software bugs, invoice errors, credential issues, or requests for quotes, trials, or upsells."
+    }
+   ]
+  },
+  "support_ticket.urgency.low": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "The ticket describes a routine request with no deadline, minimal impact, and no active user disruption.",
+     "false": "It includes a specific deadline, active user complaints, or mentions data loss or security risks."
+    },
+    {
+     "true": "The issue is cosmetic or minor, allowing for scheduled resolution without immediate workflow interruption.",
+     "false": "It blocks critical business processes, requires same-day attention, or involves urgent customer dissatisfaction."
+    },
+    {
+     "true": "The request lacks time sensitivity, allowing for standard triage and resolution during regular business hours.",
+     "false": "It demands immediate action, cites a looming deadline, or references significant operational downtime."
+    }
+   ]
+  },
+  "support_ticket.urgency.medium": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "The issue requires attention within seven days but does not block critical operations or require immediate response.",
+     "false": "It blocks major business functions, demands same-day resolution, or is a minor request that can wait weeks."
+    },
+    {
+     "true": "The priority is moderate, fitting a one-week resolution window without causing widespread service disruption or data loss.",
+     "false": "It is a severe outage, a trivial cosmetic bug, or an emergency requiring overnight emergency response."
+    },
+    {
+     "true": "The ticket is significant enough for this week's cycle but lacks the severity of a system-wide failure or crash.",
+     "false": "It is a critical production halt, a low-priority enhancement, or an urgent security breach requiring instant action."
+    }
+   ]
+  },
+  "support_ticket.urgency.high": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "The issue blocks all work today and prevents the customer from performing their essential job functions.",
+     "false": "Work is slowed or partial, or the issue can be bypassed without immediate operational stoppage."
+    },
+    {
+     "true": "Immediate action is required to restore service, as the customer is completely halted and cannot proceed.",
+     "false": "The customer is experiencing friction or delays, but they can still complete tasks or use workarounds."
+    },
+    {
+     "true": "The failure creates a complete standstill for the user, making any further work impossible until resolved.",
+     "false": "The problem causes significant annoyance or inefficiency, but does not render the entire workflow inaccessible."
+    }
+   ]
+  },
+  "support_ticket.urgency.critical": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "Active system failure or immediate financial loss is occurring for customers right now.",
+     "false": "Planned maintenance, future risks, or isolated issues affecting only internal teams without revenue impact."
+    },
+    {
+     "true": "Revenue is bleeding or core services are down for paying users at this moment.",
+     "false": "Performance degradation, intermittent glitches, or issues affecting non-critical features or free-tier users."
+    },
+    {
+     "true": "The incident causes total service outage or direct monetary loss happening in real-time.",
+     "false": "High-priority bugs, security vulnerabilities without active exploitation, or issues with delayed impact."
+    }
+   ]
+  },
+  "app_review.type.bug report": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "The reviewer identifies a specific malfunction, error message, or unexpected behavior preventing normal use.",
+     "false": "The reviewer requests new capabilities, expresses dissatisfaction with performance, or praises the product's quality."
+    },
+    {
+     "true": "The text describes a defect where the system fails to function as documented or intended.",
+     "false": "The text asks for enhancements, complains about subjective usability, or offers positive commendation."
+    },
+    {
+     "true": "The core issue is an observed technical failure, crash, or incorrect output in the product.",
+     "false": "The core issue is a desired feature, a subjective grippe, or an expression of thanks."
+    }
+   ]
+  },
+  "app_review.type.feature request": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "The reviewer explicitly asks developers to add a missing capability, tool, or setting that does not currently exist.",
+     "false": "The reviewer reports broken behavior, praises current features, or complains about existing design choices without requesting new additions."
+    },
+    {
+     "true": "The text demands the creation of new functionality or improvements to absent features, rather than fixing current errors.",
+     "false": "The text identifies defects, expresses satisfaction, or criticizes existing performance, usability, or stability issues."
+    },
+    {
+     "true": "The core intent is to propose new additions or enhancements that the product currently lacks entirely.",
+     "false": "The core intent is to report a malfunction, commend the product, or express dissatisfaction with current state."
+    }
+   ]
+  },
+  "app_review.type.praise": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "Reviewer expresses satisfaction or approval without identifying errors, missing capabilities, or negative experiences requiring remediation.",
+     "false": "Reviewer mentions specific defects, requests unimplemented features, or details negative interactions with the product or service."
+    },
+    {
+     "true": "Content focuses exclusively on positive attributes, confirming the product meets expectations without listing actionable issues or gaps.",
+     "false": "Content includes specific bug details, suggests new additions, or criticizes performance, usability, or customer support."
+    },
+    {
+     "true": "Statement validates the current experience as acceptable or desirable, containing no requests for changes or corrections.",
+     "false": "Statement highlights functional failures, desires missing tools, or complains about service quality or product limitations."
+    }
+   ]
+  },
+  "app_review.type.complaint": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "Reviewer expresses dissatisfaction with cost, intrusive ads, or specific corporate policies rather than technical failures.",
+     "false": "Reports broken functionality, requests new features, or offers positive praise without criticizing price or policy."
+    },
+    {
+     "true": "Focuses on grievances about pricing structures, ad frequency, or unfair platform rules, excluding technical errors.",
+     "false": "Describes bugs, suggests improvements, or compliments the product, lacking specific complaints about costs or policies."
+    },
+    {
+     "true": "Venting anger over high prices, annoying advertisements, or rigid policy enforcement, distinct from functional issues.",
+     "false": "Reporting software glitches, asking for new capabilities, or stating satisfaction, without targeting price or policy."
+    }
+   ]
+  },
+  "app_review.rating.1 star": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "The text expresses extreme dissatisfaction, anger, or total failure, explicitly rejecting all positive aspects.",
+     "false": "Mild criticism, balanced pros/cons, or polite disappointment where some positive traits remain acknowledged."
+    },
+    {
+     "true": "The reviewer uses harsh, absolute negative language, indicating a complete lack of satisfaction or utility.",
+     "false": "Negative feedback mixed with minor positives, or moderate dissatisfaction that acknowledges partial success."
+    },
+    {
+     "true": "The sentiment is overwhelmingly negative, describing the experience as a total loss or waste of resources.",
+     "false": "Criticism that is specific but not absolute, or includes caveats that soften the overall negativity."
+    }
+   ]
+  },
+  "app_review.rating.2 stars": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "The review expresses significant dissatisfaction but retains some minor positive remarks, avoiding total condemnation.",
+     "false": "Total failure with no positives, mild dissatisfaction with mostly praise, or extreme anger with abuse."
+    },
+    {
+     "true": "The text criticizes specific flaws while acknowledging limited value, indicating a mixed but negative overall experience.",
+     "false": "Complete rejection of the product, slight gripes with high satisfaction, or severe disappointment with rage."
+    },
+    {
+     "true": "The writer highlights major issues yet notes some redeeming qualities, stopping short of calling it worthless.",
+     "false": "Calling it a total waste, minor complaints with overall approval, or furious complaints with insults."
+    }
+   ]
+  },
+  "app_review.rating.3 stars": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "Reviewer explicitly states moderate satisfaction, balances minor flaws with general approval, or uses neutral, lukewarm language without strong praise or blame.",
+     "false": "Reviewer expresses strong dislike, total dissatisfaction, or mentions specific dealbreakers, versus expressing delight, high praise, or unqualified recommendation."
+    },
+    {
+     "true": "Text indicates the product is acceptable but flawed, using words like 'okay,' 'decent,' or 'average' with caveats.",
+     "false": "Text shows extreme negative sentiment, active recommendation against, or extreme positive sentiment, enthusiastic endorsement, or perfect experience."
+    },
+    {
+     "true": "The verdict is mixed, highlighting pros and cons equally, or describing the experience as merely satisfactory and unremarkable.",
+     "false": "The verdict is clearly negative, citing failure or regret, or clearly positive, citing excellence or exceeding expectations."
+    }
+   ]
+  },
+  "app_review.rating.4 stars": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "The review expresses strong satisfaction and high praise, but explicitly notes minor flaws, preventing a perfect score.",
+     "false": "It is flawless praise (5 stars), lists severe defects (1-2 stars), or remains neutral (3 stars)."
+    },
+    {
+     "true": "The text highlights significant positive aspects while mentioning specific, minor negative points that stop it from being perfect.",
+     "false": "It is uniformly positive (5 stars), deeply critical (1-2 stars), or lacks distinct positive/negative balance (3 stars)."
+    },
+    {
+     "true": "The reviewer is enthusiastic about the core experience but cites specific, small issues that prevent a top rating.",
+     "false": "It is unqualified praise (5 stars), angry or dismissive (1-2 stars), or lukewarm without strong pros (3 stars)."
+    }
+   ]
+  },
+  "app_review.rating.5 stars": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "The review expresses unqualified praise, perfect satisfaction, or highest recommendation with zero criticism or reservations.",
+     "false": "Positive tone but includes minor complaints, conditional praise, or suggests the experience was merely good, not exceptional."
+    },
+    {
+     "true": "The text conveys absolute delight, perfection, or enthusiastic endorsement without any mitigating language or caveats.",
+     "false": "Favorable feedback that acknowledges specific flaws, uses qualified superlatives, or indicates the product was merely acceptable."
+    },
+    {
+     "true": "The reviewer declares the experience flawless, best-in-class, or exceeds all expectations with no negative aspects mentioned.",
+     "false": "Highly positive remarks that still note specific issues, use hedging language, or imply the rating is high but not maximum."
+    }
+   ]
+  },
+  "workplace_message.intent.request": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "Sender explicitly asks recipient to perform an action, provide data, or execute a task.",
+     "false": "Sender seeks information, shares status, proposes a meeting, or engages in casual conversation."
+    },
+    {
+     "true": "The primary intent is directing the recipient to take specific, actionable steps or deliverables.",
+     "false": "The sender is clarifying uncertainty, reporting progress, coordinating time, or maintaining social rapport."
+    },
+    {
+     "true": "Sender demands a concrete response involving work output, approval, or physical/mental effort from the recipient.",
+     "false": "Sender is inquiring about facts, updating context, arranging logistics, or exchanging pleasantries."
+    }
+   ]
+  },
+  "workplace_message.intent.question": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "The sender seeks missing information, clarification, or confirmation from the recipient.",
+     "false": "The sender demands action, gives news, sets times, or makes small talk."
+    },
+    {
+     "true": "The message requires a factual answer, yes/no response, or explanation from the recipient.",
+     "false": "The message expects a task execution, status update, appointment booking, or polite greeting."
+    },
+    {
+     "true": "The sender lacks specific data and needs the recipient to provide it directly.",
+     "false": "The sender instructs, informs, coordinates schedules, or engages in casual, non-informative conversation."
+    }
+   ]
+  },
+  "workplace_message.intent.update": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "Sender states a completed action, new policy, or current status as the primary message, offering no ask.",
+     "false": "Sender seeks confirmation, requests a specific task, asks for information, or proposes a time to meet."
+    },
+    {
+     "true": "The core intent is informing the recipient of a change, achievement, or fact without requiring a response.",
+     "false": "The message asks for approval, demands resources, inquires about availability, or initiates a casual conversation."
+    },
+    {
+     "true": "Sender pushes information outward, describing what happened or is currently true, rather than pulling information in.",
+     "false": "Sender asks a direct question, requests a favor, schedules an event, or engages in small talk."
+    }
+   ]
+  },
+  "workplace_message.intent.scheduling": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "Sender explicitly requests a specific date, time slot, or proposes a meeting window to align calendars.",
+     "false": "Sender merely confirms an existing appointment, shares general availability, or asks if a time is free without proposing one."
+    },
+    {
+     "true": "Sender aims to book a new interaction by offering concrete times or asking for counterpart’s schedule to set a slot.",
+     "false": "Sender is updating on progress, asking factual questions, or making casual conversation without proposing a specific future meeting time."
+    },
+    {
+     "true": "Sender initiates the process of finding mutual availability, such as requesting a calendar link or suggesting specific meeting windows.",
+     "false": "Sender is only rescheduling, canceling, or confirming a previously agreed-upon time, or inquiring about general status without proposing a new slot."
+    }
+   ]
+  },
+  "workplace_message.intent.social": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "Sender only exchanges pleasantries, expresses gratitude, or offers casual remarks without seeking action, information, or time slots.",
+     "false": "Sender asks for status, requests changes, proposes specific meeting times, or shares new operational details requiring acknowledgment."
+    },
+    {
+     "true": "Content consists solely of greetings, appreciation, or conversational filler, ignoring any underlying need for a task or response.",
+     "false": "Message includes direct questions, specific action requests, schedule proposals, or factual updates that require processing or replies."
+    },
+    {
+     "true": "Purpose is purely relational: saying hello, thanking, or chatting, with no implicit demand for work, data, or appointments.",
+     "false": "Sender seeks clarification, demands a task, suggests a calendar entry, or reports a change in project status."
+    }
+   ]
+  },
+  "workplace_message.needs_reply": {
+   "kind": "yes_no",
+   "variants": [
+    {
+     "true": "The text ends with a direct question, request, or call to action requiring specific input from the recipient.",
+     "false": "The text is a status update, announcement, or closing remark that conveys information without demanding a response."
+    },
+    {
+     "true": "The sender explicitly seeks confirmation, approval, or data, creating an obligation for the recipient to respond.",
+     "false": "The message shares news, provides context, or offers well-wishes, leaving the recipient free to ignore it."
+    },
+    {
+     "true": "The communication creates a dependency on the recipient’s answer to proceed, such as asking for a decision or schedule.",
+     "false": "The message functions as a broadcast or FYI, where silence is an acceptable and expected reaction."
+    }
+   ]
+  },
+  "contract_clause.clause_type.payment": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "Specifies fees, invoice details, or when/how money transfers occur between parties.",
+     "false": "Covers ending the contract, data secrecy, damage caps, or ownership of created works."
+    },
+    {
+     "true": "Defines monetary obligations, billing schedules, or accepted methods for settling financial dues.",
+     "false": "Addresses contract cancellation, non-disclosure agreements, legal responsibility limits, or rights to intellectual creations."
+    },
+    {
+     "true": "Details price points, payment deadlines, or procedures for transferring funds upon service delivery.",
+     "false": "Relates to exiting the agreement, protecting trade secrets, limiting damages, or assigning copyright ownership."
+    }
+   ]
+  },
+  "contract_clause.clause_type.termination": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "The clause specifies ending the contractual relationship, including rights to cancel or expel parties from the agreement.",
+     "false": "Clauses governing monetary transfers, data secrecy, legal damages, or ownership rights to creative works."
+    },
+    {
+     "true": "The text defines how and when the business relationship dissolves, voids, or ceases to exist entirely.",
+     "false": "Provisions detailing fee schedules, non-disclosure obligations, risk allocation, or patent and copyright assignments."
+    },
+    {
+     "true": "The provision addresses the cessation of the deal, allowing either or both sides to withdraw consent.",
+     "false": "Terms covering financial obligations, trade secret protection, indemnification requirements, or exclusive usage rights."
+    }
+   ]
+  },
+  "contract_clause.clause_type.confidentiality": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "The clause restricts disclosure of trade secrets, proprietary data, or sensitive business details to unauthorized parties.",
+     "false": "It addresses monetary transfers, contract ending procedures, legal fault limits, or ownership rights over creative works."
+    },
+    {
+     "true": "The text prohibits sharing non-public information, requiring recipients to keep specific data secret and secure.",
+     "false": "It defines payment schedules, exit mechanisms, liability caps, or assigns ownership of patents, copyrights, or trademarks."
+    },
+    {
+     "true": "The provision mandates secrecy regarding internal data, preventing leaks of competitive advantages or private client information.",
+     "false": "It concerns financial obligations, termination rights, risk allocation, or the creation and assignment of intellectual property assets."
+    }
+   ]
+  },
+  "contract_clause.clause_type.liability": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "The clause caps financial damages, sets a maximum monetary recovery limit, or allocates risk for losses.",
+     "false": "It prescribes payment schedules, defines termination rights, protects trade secrets, or assigns ownership of created works."
+    },
+    {
+     "true": "The text limits recoverable amounts, excludes consequential damages, or restricts the total sum payable for breaches.",
+     "false": "It dictates when payments occur, conditions for ending the contract, non-disclosure obligations, or intellectual property assignments."
+    },
+    {
+     "true": "The provision restricts monetary exposure, caps aggregate losses, or defines the ceiling for financial compensation owed.",
+     "false": "It governs fee structures, contract dissolution mechanics, confidential information handling, or rights to patents and copyrights."
+    }
+   ]
+  },
+  "contract_clause.clause_type.intellectual property": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "Clause defines ownership, copyright, patent rights, or grants/revokes specific licenses for creative works.",
+     "false": "Clause covers fees, contract ending, data secrecy, or legal liability for damages."
+    },
+    {
+     "true": "Text allocates rights to inventions, trademarks, or software code, or permits their commercial use.",
+     "false": "Text addresses compensation, breach consequences, non-disclosure obligations, or warranty exclusions."
+    },
+    {
+     "true": "Provisions establish who owns the output or authorize third-party use of protected creative assets.",
+     "false": "Provisions regulate payments, termination procedures, confidential information handling, or liability caps."
+    }
+   ]
+  },
+  "contract_clause.clause_type.governing law": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "Specifies governing law, court jurisdiction, or dispute resolution venue for contract interpretation.",
+     "false": "Addresses payment schedules, termination rights, confidentiality obligations, or liability limits rather than legal venue."
+    },
+    {
+     "true": "Identifies specific courts, legal systems, or arbitration centers governing contract validity and enforcement.",
+     "false": "Covers payment terms, exit conditions, secrecy requirements, or damage caps, not legal jurisdiction."
+    },
+    {
+     "true": "Determines which legal system and courts resolve disagreements over contract interpretation and compliance.",
+     "false": "Relates to money transfers, ending agreements, information security, or financial responsibility, not governing law."
+    }
+   ]
+  },
+  "code_review.severity.nit": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "The complaint targets superficial style, naming, or optional features that do not affect core functionality or user experience.",
+     "false": "The issue causes functional errors, performance degradation, security risks, or breaks expected behavior in any way."
+    },
+    {
+     "true": "The problem is purely cosmetic, stylistic, or naming-related, with no impact on logic, data integrity, or system stability.",
+     "false": "The defect impedes workflow, produces incorrect results, violates security standards, or requires immediate functional correction."
+    },
+    {
+     "true": "The feedback concerns optional conventions, formatting, or labels that users can ignore without losing access to essential features.",
+     "false": "The issue prevents task completion, introduces bugs, creates safety hazards, or significantly degrades the primary user experience."
+    }
+   ]
+  },
+  "code_review.severity.minor": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "The issue is a small, low-impact improvement that should be fixed, but does not block functionality or cause critical failures.",
+     "false": "The issue is a trivial nitpick, a major functional defect, or a critical blocker requiring immediate resolution."
+    },
+    {
+     "true": "It represents a minor enhancement with negligible user impact, distinct from critical bugs or trivial cosmetic details.",
+     "false": "It is a nit-level detail, a significant major error, or a complete blocker preventing core system operation."
+    },
+    {
+     "true": "The problem is a low-severity fix that improves quality but does not break existing features or stop usage.",
+     "false": "It is a nit, a major functional regression, or a total blocker that halts the entire workflow."
+    }
+   ]
+  },
+  "code_review.severity.major": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "The defect breaks core functionality or violates explicit requirements, causing significant user disruption or data loss.",
+     "false": "Cosmetic styling, trivial typos, or complete system outages that prevent any operation entirely."
+    },
+    {
+     "true": "A functional error or architectural flaw impairs primary workflows, requiring code changes to restore intended behavior.",
+     "false": "Superficial UI tweaks, minor edge-case glitches, or total service unavailability preventing all usage."
+    },
+    {
+     "true": "The issue involves incorrect logic or structural defects that degrade essential features or compromise data integrity.",
+     "false": "Aesthetic preferences, low-impact usability nits, or catastrophic failures rendering the application completely unusable."
+    }
+   ]
+  },
+  "code_review.severity.blocker": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "The defect exposes sensitive data, allows unauthorized access, or permanently destroys records without recovery options.",
+     "false": "Broken functionality, performance degradation, or logical errors that do not compromise security or cause irreversible data loss."
+    },
+    {
+     "true": "Immediate remediation is mandatory because the issue creates a security breach or results in unrecoverable data loss.",
+     "false": "Significant bugs, UI glitches, or moderate performance issues that impair usability but preserve data integrity and security."
+    },
+    {
+     "true": "The report describes a vulnerability enabling data exfiltration or a bug causing permanent, unrecoverable loss of user content.",
+     "false": "Critical functional failures, high-impact UX problems, or code quality issues that do not threaten security or data persistence."
+    }
+   ]
+  },
+  "code_review.category.style": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "Focuses on visual layout, whitespace, variable naming conventions, or code formatting rules like line length.",
+     "false": "Addresses logic bugs, runtime errors, memory leaks, missing test cases, or algorithmic efficiency issues."
+    },
+    {
+     "true": "Critiques superficial presentation: indentation, spacing, identifier style, or adherence to linting standards.",
+     "false": "Identifies functional defects, security vulnerabilities, performance bottlenecks, or insufficient test coverage."
+    },
+    {
+     "true": "Concerns cosmetic aspects: code structure, naming consistency, or formatting compliance without changing behavior.",
+     "false": "Points to incorrect logic, unsafe operations, slow execution, or lack of validation tests."
+    }
+   ]
+  },
+  "code_review.category.correctness": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "The comment identifies invalid logic, incorrect state transitions, or handling of boundary values and exceptions.",
+     "false": "It critiques code formatting, execution speed, vulnerability exposure, or missing test coverage, ignoring logical flaws."
+    },
+    {
+     "true": "It flags that the code fails to produce expected results for valid inputs or specific conditions.",
+     "false": "It addresses readability, resource efficiency, input sanitization, or test suite completeness without mentioning logical errors."
+    },
+    {
+     "true": "The feedback targets functional defects, such as wrong calculations, missing cases, or broken conditional branches.",
+     "false": "It focuses on naming conventions, latency optimization, threat mitigation, or adding assertions, rather than functional accuracy."
+    }
+   ]
+  },
+  "code_review.category.performance": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "The comment explicitly cites speed, latency, memory usage, or computational complexity as the primary concern.",
+     "false": "It concerns logic errors, code readability, missing test coverage, or vulnerabilities, regardless of execution cost."
+    },
+    {
+     "true": "The focus is on runtime efficiency, resource consumption, or algorithmic optimization rather than functional output.",
+     "false": "It addresses syntax, naming conventions, security flaws, or incorrect behavior, even if performance is secondary."
+    },
+    {
+     "true": "The critique targets execution time, memory footprint, or processing overhead as the main issue.",
+     "false": "It highlights bugs, style violations, insufficient testing, or security risks, excluding pure efficiency concerns."
+    }
+   ]
+  },
+  "code_review.category.security": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "The comment identifies exploitable flaws like injection risks, exposed credentials, or improper input validation.",
+     "false": "It flags logical bugs, missing test coverage, slow algorithms, or formatting issues instead of exploitation vectors."
+    },
+    {
+     "true": "The focus is preventing unauthorized access, data leakage, or malicious code execution through specific vulnerabilities.",
+     "false": "It addresses functional correctness, code readability, runtime efficiency, or insufficient assertion coverage in tests."
+    },
+    {
+     "true": "The reviewer highlights risks of secret exposure, injection attacks, or lack of secure handling for sensitive data.",
+     "false": "It critiques incorrect logic, verbose styling, suboptimal performance patterns, or gaps in automated test suites."
+    }
+   ]
+  },
+  "code_review.category.tests": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "The comment requests adding, fixing, or improving unit, integration, or end-to-end test coverage.",
+     "false": "The comment critiques code style, logic bugs, performance bottlenecks, or security vulnerabilities, even if tests are mentioned."
+    },
+    {
+     "true": "The feedback specifically demands verification via automated test suites or complains about insufficient test assertions.",
+     "false": "The feedback addresses code correctness, readability, computational efficiency, or security flaws, regardless of test references."
+    },
+    {
+     "true": "The core issue is the absence or inadequacy of automated checks validating the code's behavior.",
+     "false": "The core issue is stylistic choices, functional errors, runtime speed, or vulnerability exposure, not test presence."
+    }
+   ]
+  },
+  "log_event.level.debug": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "Routine tracing of variable values, loop iterations, or internal state changes for developer troubleshooting.",
+     "false": "User-facing status updates, successful operation confirmations, or non-fatal anomalies requiring operator attention."
+    },
+    {
+     "true": "Low-level technical diagnostics intended for developers, such as memory usage or function entry points.",
+     "false": "Standard operational logs, expected success messages, or warnings indicating potential but non-blocking issues."
+    },
+    {
+     "true": "Verbose internal mechanics like stack traces or argument details, invisible to standard end-user monitoring.",
+     "false": "High-level event summaries, informational notifications, or alerts signaling degraded performance or recoverable faults."
+    }
+   ]
+  },
+  "log_event.level.info": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "The entry states system status, completion, or standard activity without indicating failure, risk, or abnormal behavior.",
+     "false": "The entry signals potential issues, unexpected states, or detailed low-level tracing that requires attention or context."
+    },
+    {
+     "true": "It confirms expected execution flow, successful operations, or routine status updates without any indication of deviation.",
+     "false": "It highlights anomalies, resource constraints, configuration changes, or granular internal processes that exceed standard reporting."
+    },
+    {
+     "true": "The message reflects normal, successful business logic or system health with no negative or cautionary implications.",
+     "false": "It includes diagnostic details, preliminary alerts, or unexpected conditions that signal deviation from expected baseline performance."
+    }
+   ]
+  },
+  "log_event.level.warning": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "The event flags an abnormal condition that the system recovered from without user intervention or data loss.",
+     "false": "Routine status updates, failed operations requiring manual restarts, or unhandled exceptions causing service downtime."
+    },
+    {
+     "true": "The log indicates a non-fatal anomaly where the process continued successfully after encountering the issue.",
+     "false": "Fatal crashes, successful standard operations, or low-level trace data that does not signal potential problems."
+    },
+    {
+     "true": "The message highlights a deviation from expected behavior that the application automatically corrected or worked around.",
+     "false": "Confirmed failures requiring operator action, successful transaction confirmations, or diagnostic trace information."
+    }
+   ]
+  },
+  "log_event.level.error": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "A specific operation failed, returning a non-zero exit code or exception, without indicating system-wide instability.",
+     "false": "Warnings about potential issues, successful retries with minor delays, or critical failures causing total system outage."
+    },
+    {
+     "true": "The log records a failed action where the system continued operating normally without triggering emergency shutdown procedures.",
+     "false": "Preventive warnings, successful completions with non-fatal anomalies, or fatal crashes that halted all services immediately."
+    },
+    {
+     "true": "An expected task did not complete successfully, but the application remains responsive and no global state corruption occurred.",
+     "false": "Informational status updates, non-blocking alerts about resource limits, or catastrophic failures requiring immediate manual intervention."
+    }
+   ]
+  },
+  "log_event.level.critical": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "System is completely unavailable, or data integrity is compromised requiring immediate intervention to prevent total loss.",
+     "false": "Degraded performance, partial outages, failed retries, or recoverable errors that do not halt core operations."
+    },
+    {
+     "true": "Core business functions are non-operational, or persistent data corruption exists that cannot be self-healed.",
+     "false": "Elevated latency, intermittent connection drops, or transient errors that resolve automatically without manual intervention."
+    },
+    {
+     "true": "Service is down for all users, or unrecoverable data loss is occurring in real-time.",
+     "false": "Warning-level anomalies, non-critical component failures, or performance metrics exceeding thresholds but maintaining functionality."
+    }
+   ]
+  },
+  "log_event.security_relevant": {
+   "kind": "yes_no",
+   "variants": [
+    {
+     "true": "The event involves credential validation, privilege checks, or active attempts to breach system boundaries or unauthorized access.",
+     "false": "Routine logins, successful permission grants, scheduled maintenance, or standard user activity without malicious intent or failed access attempts."
+    },
+    {
+     "true": "Indicates compromised credentials, denied access requests, or explicit attempts to exploit vulnerabilities, bypass controls, or escalate privileges.",
+     "false": "Normal service restarts, standard authentication successes, routine configuration changes, or benign user interactions lacking hostile intent or security breaches."
+    },
+    {
+     "true": "Relates to identity verification failures, unauthorized resource access attempts, or active exploitation of security controls and permission boundaries.",
+     "false": "Standard operational tasks, successful login events, regular system updates, or user actions that do not involve threats or access violations."
+    }
+   ]
+  },
+  "restaurant_review.aspect.food": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "The reviewer focuses on flavor, texture, or specific menu items like pasta or steak.",
+     "false": "The focus is on staff politeness, bill cost, decor, or cleanliness of restrooms."
+    },
+    {
+     "true": "The text evaluates culinary qualities such as spiciness, freshness, or portion size.",
+     "false": "The text assesses wait times, waiter attentiveness, lighting, or table cleanliness."
+    },
+    {
+     "true": "The primary concern is the taste profile or preparation of specific dining dishes.",
+     "false": "The primary concern is service speed, pricing fairness, room acoustics, or sanitary conditions."
+    }
+   ]
+  },
+  "restaurant_review.aspect.service": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "The review focuses on staff behavior, treatment, or wait times, ignoring food, price, or setting.",
+     "false": "Mentions of staff are minor details while food, price, ambience, or hygiene remain the central topic."
+    },
+    {
+     "true": "The primary subject is the quality of service, including employee interactions or queue duration.",
+     "false": "Service is mentioned incidentally, with the core criticism or praise directed at food, cost, or atmosphere."
+    },
+    {
+     "true": "The text evaluates the human aspect of the visit, such as staff helpfulness or speed of service.",
+     "false": "The focus is on tangible elements like dish quality, menu pricing, room decor, or cleanliness standards."
+    }
+   ]
+  },
+  "restaurant_review.aspect.price": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "The text's core judgment hinges on cost relative to quality, explicitly calling the meal overpriced or a bargain.",
+     "false": "The focus is on taste, staff behavior, atmosphere, or cleanliness, with cost mentioned only incidentally."
+    },
+    {
+     "true": "The reviewer's primary verdict is whether the money spent was worth the experience received.",
+     "false": "The main complaint or praise targets ingredients, hospitality, decor, or sanitation standards rather than the bill."
+    },
+    {
+     "true": "The assessment centers on the financial transaction, judging if the price tag justified the output.",
+     "false": "The critique prioritizes sensory details like flavor, service speed, room layout, or sanitary conditions."
+    }
+   ]
+  },
+  "restaurant_review.aspect.ambience": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "The review focuses on atmosphere, noise levels, lighting, or interior design, rather than the meal itself.",
+     "false": "The primary critique centers on dish quality, staff behavior, cost, or cleanliness, even if decor is mentioned."
+    },
+    {
+     "true": "The text evaluates the physical setting, ambiance, or sensory environment as the main subject of the review.",
+     "false": "The core topic is food taste, service speed, pricing fairness, or sanitary conditions, not the surrounding space."
+    },
+    {
+     "true": "The writer emphasizes the mood, acoustics, or visual elements of the venue as the primary point.",
+     "false": "The main complaint or praise targets the menu items, employee interaction, bill amount, or hygiene standards."
+    }
+   ]
+  },
+  "restaurant_review.aspect.hygiene": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "The review focuses on cleanliness, sanitation, or the physical state of restrooms and dining areas.",
+     "false": "Complaints about pests, expired food, rude staff, high prices, or noisy music, not cleanliness."
+    },
+    {
+     "true": "Primary criticism targets dirty tables, stale dishes, or unhygienic kitchen practices and bathroom conditions.",
+     "false": "Issues involving taste, portion size, waiter attitude, billing errors, or lighting and decor."
+    },
+    {
+     "true": "The text emphasizes sanitary conditions, presence of germs, or failure to maintain clean facilities.",
+     "false": "Focus on menu quality, service speed, cost-effectiveness, or aesthetic atmosphere and comfort."
+    }
+   ]
+  },
+  "restaurant_review.sentiment.very negative": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "Reviewer expresses extreme dissatisfaction, using strong language like 'worst' or 'terrible', indicating the product is unusable.",
+     "false": "Moderate criticism, specific complaints without hyperbole, or mixed reviews that include some positive aspects."
+    },
+    {
+     "true": "Tone is intensely hostile, describing the experience as a complete failure or total waste of money.",
+     "false": "Disappointment, minor annoyances, or balanced feedback that acknowledges flaws but not total ruin."
+    },
+    {
+     "true": "Reviewer rejects the item entirely, labeling it defective, scam-like, or the absolute worst purchase ever made.",
+     "false": "Regret, hesitation, or mild negativity where the reviewer still considers the item somewhat acceptable."
+    }
+   ]
+  },
+  "restaurant_review.sentiment.negative": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "Reviewer expresses dissatisfaction or criticism without using extreme, abusive, or highly emotional language.",
+     "false": "Reviewer uses abusive, hateful, or extremely intense language, or expresses complete indifference or satisfaction."
+    },
+    {
+     "true": "Sentiment is mildly to moderately bad, criticizing quality or experience, but lacking severe anger or hatred.",
+     "false": "Sentiment is extremely hostile, abusive, or severe, or the reviewer is neutral or happy."
+    },
+    {
+     "true": "The review contains complaints or negative opinions but remains within the bounds of polite or standard critique.",
+     "false": "The review is riddled with insults, extreme fury, or the reviewer expresses no issues or praise."
+    }
+   ]
+  },
+  "restaurant_review.sentiment.neutral": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "The text displays no clear satisfaction or dissatisfaction, using purely factual, observational language without evaluative adjectives.",
+     "false": "The text includes mild praise, polite criticism, or expresses subjective preferences, indicating a slight positive or negative lean."
+    },
+    {
+     "true": "The reviewer remains emotionally detached, citing only objective facts or features without expressing any personal approval or disapproval.",
+     "false": "The reviewer hints at disappointment, gratitude, or mixed feelings, revealing a subtle underlying opinion or emotional reaction."
+    },
+    {
+     "true": "The statement is a flat, objective description of events or attributes, lacking any sentiment-bearing words or tone markers.",
+     "false": "The statement contains hedging, soft criticism, or gentle endorsement, signaling a tentative or nuanced evaluative stance."
+    }
+   ]
+  },
+  "restaurant_review.sentiment.positive": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "The reviewer expresses satisfaction, approval, or recommendation, indicating a favorable overall sentiment.",
+     "false": "Sentiment is neutral, mixed, critical, or explicitly enthusiastic beyond standard positive feedback."
+    },
+    {
+     "true": "The tone is appreciative or favorable, highlighting benefits or recommending the product to others.",
+     "false": "The tone is indifferent, critical, mixed, or excessively euphoric, not standard positive."
+    },
+    {
+     "true": "The feedback affirms value or quality, signaling a generally happy and approving experience.",
+     "false": "The feedback is ambiguous, dissatisfied, balanced, or intensely ecstatic, not moderate positive."
+    }
+   ]
+  },
+  "restaurant_review.sentiment.very positive": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "Reviewer expresses extreme enthusiasm, using superlatives like 'best ever' or 'amazing' without significant reservations.",
+     "false": "Reviewer expresses strong satisfaction using words like 'good' or 'satisfied' but lacks the intensity of 'amazing' or 'best'."
+    },
+    {
+     "true": "Tone is ecstatic or rapturous, highlighting flawless performance and using highest praise without any minor caveats.",
+     "false": "Tone is favorable or pleased, noting specific benefits but stopping short of the highest superlative praise or ecstatic tone."
+    },
+    {
+     "true": "Verdict is unequivocally top-tier, praising the subject as exceptional or superior to all others without qualification.",
+     "false": "Verdict is highly favorable or approving, recommending the subject strongly but not declaring it the absolute best or exception."
+    }
+   ]
+  },
+  "job_posting.seniority.intern": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "The role is explicitly titled intern, trainee, or entry-level non-contributor requiring supervision and no production ownership.",
+     "false": "Junior or analyst roles with independent task ownership, or roles requiring prior professional experience or full-time status."
+    },
+    {
+     "true": "The position is a short-term, learning-focused role where the candidate cannot independently ship production features or code.",
+     "false": "Entry-level positions with independent deliverables, or roles labeled junior, associate, or analyst that require prior work experience."
+    },
+    {
+     "true": "The job description restricts candidates to students or recent graduates with no prior professional employment or production responsibilities.",
+     "false": "Roles accepting candidates with prior professional experience, or junior positions requiring independent execution of assigned tasks."
+    }
+   ]
+  },
+  "job_posting.seniority.junior": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "Role requires less than two years experience, entry-level duties, and minimal independent decision-making authority.",
+     "false": "Internships, probationary periods, or roles explicitly labeled 'early career' without a junior title."
+    },
+    {
+     "true": "Position is the lowest standard full-time level, requiring supervision but not trainee status or advanced expertise.",
+     "false": "Interns, apprentices, mid-level roles, or any position requiring significant independent project ownership."
+    },
+    {
+     "true": "The role is an entry-level full-time position, distinct from temporary trainee roles and below mid-level complexity.",
+     "false": "Internships, fellowships, or roles explicitly categorized as mid-level, senior, lead, or principal."
+    }
+   ]
+  },
+  "job_posting.seniority.mid-level": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "The role requires 3–7 years of experience, independent execution, and no primary management of other engineers.",
+     "false": "Includes internships, 0–2 years (junior), 8+ years (senior), or primary responsibility for leading teams."
+    },
+    {
+     "true": "Compensation and scope target established professionals needing minimal supervision, distinct from entry-level or expert-track positions.",
+     "false": "Targets new graduates, junior associates, senior architects, or leads with direct reporting lines and strategic ownership."
+    },
+    {
+     "true": "The position demands proven competency in core tasks without requiring advanced mentorship or architectural decision-making authority.",
+     "false": "Requires learning fundamentals (intern/junior), solving ambiguous complex problems (senior), or directing others' work (lead/principal)."
+    }
+   ]
+  },
+  "job_posting.seniority.senior": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "The title explicitly contains 'Senior' without 'Lead', 'Principal', 'Staff', or 'Director' modifiers.",
+     "false": "Titles are 'Junior', 'Mid', 'Lead', 'Principal', or 'Director', or contain 'Staff' or 'Principal'."
+    },
+    {
+     "true": "The role denotes an individual contributor above mid-level but below lead, principal, or staff seniority.",
+     "false": "The role is intern, junior, mid-level, lead, principal, or explicitly designated as staff or director."
+    },
+    {
+     "true": "The classification is 'Senior' specifically, excluding 'Senior Lead', 'Senior Principal', or 'Senior Director' variants.",
+     "false": "The classification is junior, mid, lead, principal, or includes 'Lead', 'Principal', or 'Director' suffixes."
+    }
+   ]
+  },
+  "job_posting.seniority.lead or principal": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "The title indicates a principal engineer or lead architect role, explicitly denoting top-tier individual contributor status.",
+     "false": "The role is a standard senior engineer or manager, lacking explicit principal or lead designations in the title."
+    },
+    {
+     "true": "The job description identifies the position as a principal or lead, representing the highest individual contributor tier.",
+     "false": "The description lists it as a senior, mid-level, or junior role, without principal or lead terminology."
+    },
+    {
+     "true": "The position is designated as principal or lead, signifying advanced expertise beyond the standard senior level.",
+     "false": "The position is labeled senior, mid-level, junior, or intern, despite high responsibilities, without principal or lead titles."
+    }
+   ]
+  },
+  "job_posting.remote": {
+   "kind": "yes_no",
+   "variants": [
+    {
+     "true": "Employees work exclusively from home, with no requirement to visit company offices or client sites.",
+     "false": "Hybrid roles requiring periodic office attendance, or roles demanding regular travel to external locations."
+    },
+    {
+     "true": "The position mandates zero physical presence at any corporate facility, allowing work from any location.",
+     "false": "Hybrid setups requiring specific in-office days, or roles necessitating regular visits to client premises."
+    },
+    {
+     "true": "All duties are performed remotely, without any obligation to be physically present at a work site.",
+     "false": "Hybrid arrangements requiring scheduled office days, or positions requiring frequent travel to external venues."
+    }
+   ]
+  },
+  "customer_message.churn_risk": {
+   "kind": "yes_no",
+   "variants": [
+    {
+     "true": "Customer expresses dissatisfaction, mentions specific competitor pricing, or explicitly requests account termination procedures.",
+     "false": "Neutral status inquiries, general feature questions, or polite compliments without any negative sentiment or exit intent."
+    },
+    {
+     "true": "Language conveys frustration, compares benefits against rival services, or asks for steps to end the subscription.",
+     "false": "Calm informational requests, casual conversation, or queries about billing details without expressing anger or desire to leave."
+    },
+    {
+     "true": "User signals intent to churn via anger, competitor benchmarking, or direct requests for cancellation instructions.",
+     "false": "Neutral tone, routine support questions, or satisfied feedback lacking any indication of leaving or negative comparison."
+    }
+   ]
+  },
+  "customer_message.tone.calm": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "Tone remains neutral; expresses disagreement or frustration without profanity, insults, or aggressive intent.",
+     "false": "Contains profanity, personal attacks, or explicit threats; displays elevated emotional intensity beyond polite disagreement."
+    },
+    {
+     "true": "Language stays professional or civil; conveys dissatisfaction through logic or facts rather than emotional outbursts.",
+     "false": "Uses hostile vocabulary, dehumanizing terms, or commands; shows active hostility or intent to harm."
+    },
+    {
+     "true": "Communication stays measured; criticizes actions or policies without targeting the recipient’s character or dignity.",
+     "false": "Personalizes grievances with insults, sarcasm, or yelling; exhibits visible anger or abusive behavior."
+    }
+   ]
+  },
+  "customer_message.tone.annoyed": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "Frustration is evident through sarcasm, repetition, or short, sharp sentences, but no explicit threats or profanity.",
+     "false": "Calm statements, active shouting with insults, or extreme rage exceeding standard irritation levels."
+    },
+    {
+     "true": "Tone shows irritability and impatience with the situation, lacking aggression or complete emotional detachment.",
+     "false": "Polite inquiries, hostile screaming with abuse, or intense fury involving personal attacks."
+    },
+    {
+     "true": "Expression indicates mild to moderate frustration with the process or delay, without crossing into hostility.",
+     "false": "Neutral factual reporting, aggressive yelling with slurs, or explosive anger accompanied by threats."
+    }
+   ]
+  },
+  "customer_message.tone.angry": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "The sender expresses intense frustration, hostility, or rage, indicating a strong emotional outburst.",
+     "false": "The tone is merely irritated, sarcastic, or verbally aggressive without the intensity of anger."
+    },
+    {
+     "true": "The language conveys deep resentment, indignation, or violent emotional agitation directed at the recipient.",
+     "false": "The message shows mild annoyance, passive-aggressive behavior, or polite dissatisfaction."
+    },
+    {
+     "true": "The writer displays explosive temper, screaming caps, or aggressive demands driven by high emotional intensity.",
+     "false": "The communication is stern, cold, or critical, lacking the heated, volatile quality of anger."
+    }
+   ]
+  },
+  "customer_message.tone.abusive": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "Targets personal traits, identity, or appearance with insults, slurs, or dehumanizing language.",
+     "false": "Expresses frustration at a situation, product failure, or service delay without attacking the person."
+    },
+    {
+     "true": "Uses explicit profanity, threats, or derogatory terms directed specifically at the recipient's character.",
+     "false": "Uses strong emotional language or expletives directed at the problem, not the individual."
+    },
+    {
+     "true": "Contains verbal harassment, name-calling, or attempts to demean the recipient's humanity or worth.",
+     "false": "Displays high anger or annoyance through tone, but remains focused on the issue, not the person."
+    }
+   ]
+  },
+  "medical_admin.request_type.appointment": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "Patient requests scheduling, rescheduling, or cancelling a specific healthcare provider visit or clinical appointment.",
+     "false": "Requests relate to medication refills, medical records, billing inquiries, or general health questions without scheduling intent."
+    },
+    {
+     "true": "Intent is to secure, change, or terminate a slot with a doctor, nurse, or specialist for a consultation.",
+     "false": "Intent concerns prescription renewals, retrieving test results, discussing insurance costs, or seeking medical advice without booking."
+    },
+    {
+     "true": "Patient aims to manage calendar time for a face-to-face or telehealth interaction with clinical staff.",
+     "false": "Patient seeks document access, financial clarifications, medication adjustments, or informational queries unrelated to meeting scheduling."
+    }
+   ]
+  },
+  "medical_admin.request_type.prescription refill": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "Patient requests duplication of a previously dispensed medication with no new symptoms or dosage changes.",
+     "false": "New symptom onset, dosage adjustments, initial prescriptions, or requests for unrelated medical advice."
+    },
+    {
+     "true": "Request specifically targets replenishing a current medication supply rather than initiating new therapy.",
+     "false": "Requests for new drugs, changes to existing regimens, or inquiries about medication side effects."
+    },
+    {
+     "true": "Patient seeks a repeat order for an active prescription without requesting clinical evaluation.",
+     "false": "Requests for diagnostic tests, new medication approvals, or modifications to current treatment plans."
+    }
+   ]
+  },
+  "medical_admin.request_type.records": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "Patient explicitly requests copies, duplicates, or access to their stored medical documentation for their own use.",
+     "false": "Requests for new treatment plans, verbal summaries of history, or current status updates on ongoing care."
+    },
+    {
+     "true": "The core intent is obtaining physical or digital files containing diagnostic results, notes, or history.",
+     "false": "Asking for new prescriptions, billing invoices, appointment scheduling, or general advice on symptoms."
+    },
+    {
+     "true": "Patient demands the actual data artifacts, such as lab reports, imaging, or clinical notes, in transferable form.",
+     "false": "Inquiries about what happened during a visit, requesting medication refills, or questioning insurance coverage details."
+    }
+   ]
+  },
+  "medical_admin.request_type.billing": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "The patient inquires about insurance coverage, claims status, or specific line-item charges on a bill.",
+     "false": "The patient asks for appointment scheduling, prescription refills, medical records, or general service inquiries."
+    },
+    {
+     "true": "The request concerns explaining costs, verifying insurance eligibility, or disputing a financial transaction detail.",
+     "false": "The request involves booking visits, renewing medications, retrieving clinical documents, or asking for non-financial services."
+    },
+    {
+     "true": "The inquiry targets payment amounts, insurance authorization, or invoice clarification regarding medical services provided.",
+     "false": "The inquiry seeks logistical help with appointments, medication supply, health information access, or other administrative tasks."
+    }
+   ]
+  },
+  "medical_admin.request_type.other": {
+   "kind": "label",
+   "variants": [
+    {
+     "true": "Request concerns clinical care, urgent needs, or general health queries outside administrative service categories.",
+     "false": "Ask for scheduling, medication refills, document retrieval, or financial invoice clarification."
+    },
+    {
+     "true": "Inquiry targets medical advice, symptom management, or non-administrative clinical support services.",
+     "false": "Seeking appointment booking, Rx renewals, medical records access, or billing statement details."
+    },
+    {
+     "true": "Topic involves treatment plans, immediate care, or general health information not tied to account operations.",
+     "false": "Focusing on visit times, prescription renewals, file requests, or payment/billing questions."
+    }
+   ]
+  }
+ }
+}

@@ -19,11 +19,33 @@ model to depend on a field our own benchmark suites never send, so each question
 
 from __future__ import annotations
 
+import json
 import random
+from functools import lru_cache
+from pathlib import Path
 from typing import Any, Iterable
 
 # How often a noul question that *could* carry criteria actually does.
 PRESENT = 0.6
+
+# Teacher-written variants, richer than the one-line label descriptions and naming the near misses
+# on the false side. Written offline by kenning/enrich_criteria.py; absent is fine.
+VARIANTS_FILE = Path(__file__).with_name("criteria_variants.json")
+
+
+@lru_cache(maxsize=1)
+def _variants() -> dict[str, list[dict[str, str]]]:
+    try:
+        doc = json.loads(VARIANTS_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return {k: list(v.get("variants") or []) for k, v in (doc.get("criteria") or {}).items()
+            if v.get("variants")}
+
+
+def variants_for(key: str | None) -> list[dict[str, str]]:
+    """Teacher-written variants for one question template, or []."""
+    return _variants().get(key or "", [])
 
 
 def _sentence(text: str) -> str:
@@ -40,20 +62,29 @@ def _sentence(text: str) -> str:
 
 
 def noul(rng: random.Random, instructions: str, when_true: str | None = None,
-         when_false: str | None = None, present: float = PRESENT) -> dict[str, Any]:
+         when_false: str | None = None, present: float = PRESENT,
+         key: str | None = None) -> dict[str, Any]:
     """A noul question, carrying ``{"true", "false"}`` criteria some of the time.
 
-    Falls back to a bare question when either side is missing, so a caller with only one usable
-    description still produces valid data rather than a half-filled dict.
+    ``key`` names the question template. When teacher-written variants exist for it one is sampled,
+    which is both richer and more varied than the single terse pair; otherwise the generator's own
+    descriptions are used. Falls back to a bare question when neither is available, so a caller with
+    only one usable description still produces valid data rather than a half-filled dict.
     """
     q: dict[str, Any] = {"type": "noul", "instructions": instructions}
-    if when_true and when_false and rng.random() < present:
-        q["criteria"] = {"true": _sentence(when_true), "false": _sentence(when_false)}
+    choices = variants_for(key)
+    if not choices and not (when_true and when_false):
+        return q
+    if rng.random() >= present:
+        return q
+    pick = rng.choice(choices) if choices else {"true": when_true, "false": when_false}
+    q["criteria"] = {"true": _sentence(pick["true"]), "false": _sentence(pick["false"])}
     return q
 
 
 def about_label(rng: random.Random, instructions: str, label: str, description: str | None = None,
-                others: Iterable[str] = (), present: float = PRESENT) -> dict[str, Any]:
+                others: Iterable[str] = (), present: float = PRESENT,
+                key: str | None = None) -> dict[str, Any]:
     """Criteria for the "is the answer <label>?" shape the generators use for balanced negatives.
 
     The whole decision is what ``label`` means, which is precisely what the stem leaves implicit, so
@@ -65,4 +96,4 @@ def about_label(rng: random.Random, instructions: str, label: str, description: 
     if rest:
         shown = list(rest)[:4]
         when_false += ", but one of the other options (" + ", ".join(shown) + ")"
-    return noul(rng, instructions, when_true, when_false, present)
+    return noul(rng, instructions, when_true, when_false, present, key)
