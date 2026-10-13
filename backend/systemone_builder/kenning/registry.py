@@ -105,6 +105,7 @@ def summary(home: Path, name: str) -> dict[str, Any]:
         "trained_on": cfg.get("trained_on"),
         "train_groups": cfg.get("train_groups"),
         "temperature": cfg.get("temperature"),
+        "bias": cfg.get("bias"),
         "max_length": cfg.get("max_length"),
         "hyperparameters": cfg.get("hyperparameters"),
         "heldout": {k: (held.get(k) or {}).get("all") for k in ("zero_shot", "trained", "calibrated")},
@@ -238,6 +239,8 @@ def model_card(name: str, s: dict[str, Any], bench: dict[str, dict[str, Any]] | 
         "- Architecture: cross-encoder; every candidate answer is scored against the state, and each question's "
         "distribution is `softmax(scores / T)` with per-type temperatures fitted on held-out data",
         f"- Temperatures: `{json.dumps(s.get('temperature'))}`",
+        *([f"- Decision bias: `{json.dumps(s.get('bias'))}` (added to \"yes\" after the temperature "
+           "divide; temperature alone cannot move a two-option decision)"] if s.get("bias") else []),
         f"- Max tokens per (state, answer) pair: {s.get('max_length')}",
         f"- Created: {s.get('created')}",
         "",

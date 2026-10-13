@@ -79,13 +79,15 @@ def model() -> Kenning:
 
 def describe(m: Kenning) -> dict[str, object]:
     return {"model": m.name, "path": m.path, "device": m.device, "temperature": m.temperature,
+            "bias": m.bias,
             "base_model": m.config.get("base_model", m.path), "max_length": m.max_length}
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     m = await asyncio.to_thread(model)
-    print(f"[kenning-serve] serving {m.name} ({m.path}) on {m.device}; temperatures {m.temperature}", flush=True)
+    print(f"[kenning-serve] serving {m.name} ({m.path}) on {m.device}; temperatures {m.temperature}; "
+          f"decision bias {m.bias}", flush=True)
     yield
 
 

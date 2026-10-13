@@ -21,8 +21,8 @@ from typing import Any
 import httpx
 
 from systemone_builder.kenning.importer import load_rows
-from systemone_builder.kenning.model import CONFIG_FILE, read_config
-from systemone_builder.kenning.train import fit_temperatures, metrics
+from systemone_builder.kenning.model import BIAS_TYPES, CONFIG_FILE, read_config
+from systemone_builder.kenning.train import fit_biases, fit_temperatures, metrics
 from systemone_builder.system_one.contract import Question
 
 Raw = list[tuple[str, list[float], list[float]]]
@@ -37,17 +37,24 @@ def _vector(q: Question, options: list[str], t: Any) -> list[float]:
     return [1.0 if o == key else 0.0 for o in options]
 
 
-def scores_from(answer: dict[str, Any], temperature: float) -> tuple[list[str], list[float]]:
-    """(options, scores) recovered from an answer's probabilities at the given temperature."""
+def scores_from(answer: dict[str, Any], temperature: float, bias: float = 0.0) -> tuple[list[str], list[float]]:
+    """(options, scores) recovered from an answer's probabilities at the given temperature.
+
+    ``bias`` is the decision bias the serving model already applied, which has to come back out or we
+    would refit on top of it and double it. The served logit is ``score/T + bias`` for the first
+    option, so recovering ``T * log p`` returns ``score + T * bias`` and the term is removed here.
+    """
     if answer["type"] == "noul":
         p = min(max(float(answer["noul"]), 1e-12), 1 - 1e-12)
-        return ["yes", "no"], [temperature * math.log(p), temperature * math.log(1 - p)]
+        return ["yes", "no"], [temperature * math.log(p) - temperature * bias,
+                               temperature * math.log(1 - p)]
     probs = answer["probabilities"]
     options = list(probs)
     return options, [temperature * math.log(max(float(probs[o]), 1e-12)) for o in options]
 
 
 async def collect(url: str, rows: list[dict[str, Any]], temps: dict[str, float],
+                  biases: dict[str, float] | None = None,
                   concurrency: int = 4) -> tuple[Raw, set[str]]:
     """Raw (type, scores, target) per question, and the model names that answered."""
     sem = asyncio.Semaphore(concurrency)
@@ -62,7 +69,8 @@ async def collect(url: str, rows: list[dict[str, Any]], temps: dict[str, float],
         models.add(body.get("model", ""))
         for qid, t in row["targets"].items():
             q = Question.model_validate(row["questions"][qid])
-            options, scores = scores_from(body["answers"][qid], temps.get(q.type, 1.0))
+            options, scores = scores_from(body["answers"][qid], temps.get(q.type, 1.0),
+                                          (biases or {}).get(q.type, 0.0))
             if q.type == "score":  # levels come back keyed "0", "1", ...
                 options = [str(o) for o in options]
             raw.append((q.type, scores, _vector(q, options, t)))
@@ -79,24 +87,30 @@ def calibrate(model_dir: Path, data: Path, url: str) -> dict[str, Any]:
         raise ValueError(f"{model_dir} has no {CONFIG_FILE}: not a Kenning model")
     name = config.get("name") or model_dir.name
     old = {"noul": 1.0, "choice": 1.0, "score": 1.0, **config.get("temperature", {})}
+    old_bias = {"noul": 0.0, **(config.get("bias") or {})}
     qpath = data.with_name(data.stem + ".questions.json")
     rows, _ = load_rows(data, qpath if qpath.exists() else None)
-    raw, models = asyncio.run(collect(url, rows, old))
+    raw, models = asyncio.run(collect(url, rows, old, old_bias))
     if models != {name}:
         raise ValueError(f"the model served at {url} is {', '.join(sorted(models)) or 'unknown'}, not {name}: "
                          "activate it first (Models page) so its answers are the ones being calibrated")
     new = {**old, **fit_temperatures(raw)}
+    new_bias = {k: v for k, v in {**old_bias, **fit_biases(raw, new)}.items() if k in BIAS_TYPES}
     return {"model": name, "data": data.name, "questions": len(raw), "temperature_before": old,
-            "temperature_after": new, "before": metrics(raw, old), "after": metrics(raw, new)}
+            "temperature_after": new, "bias_before": old_bias, "bias_after": new_bias,
+            "before": metrics(raw, old, old_bias), "after": metrics(raw, new, new_bias)}
 
 
 def save(model_dir: Path, report: dict[str, Any], name: str | None = None) -> None:
     """Write a calibrate() report's temperatures into model_dir's config, keeping the old ones in its history."""
     config = read_config(model_dir)
     history = config.get("calibration_history", [])
-    history.append({"temperature": report["temperature_before"],
+    history.append({"temperature": report["temperature_before"], "bias": report.get("bias_before"),
                     "replaced": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
-    config.update({"temperature": report["temperature_after"], "calibration_history": history,
+    config.update({"temperature": report["temperature_after"],
+                   # explicit: an empty dict means "no bias", not "keep whatever was there"
+                   "bias": report["bias_after"],
+                   "calibration_history": history,
                    "calibration": {k: report[k] for k in ("data", "questions", "before", "after")}})
     if name:
         config["name"] = name

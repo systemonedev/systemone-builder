@@ -44,6 +44,11 @@ CONFIG_FILE = "kenning.json"
 LEGACY_CONFIG_FILES = ("s1_config.json",)  # written by models trained before the Kenning rename
 TEMPLATE_VERSION = 1
 # Served when nothing else is configured: the published, calibrated Kenning (Apache-2.0).
+# Only two-option questions take a decision bias: for choice and score the option order is not fixed,
+# so a scalar on "the first option" would mean a different thing from one question to the next.
+BIAS_TYPES = ("noul",)
+# The grid fit_biases searches; a value outside it did not come from our own calibration.
+BIAS_LIMIT = 4.0
 DEFAULT_MODEL = "systemonedev/kenning-large-v0.5"
 # Starting point for training: a zero-shot NLI model with no non-commercial data (MIT).
 DEFAULT_BASE = "MoritzLaurer/deberta-v3-large-zeroshot-v2.0-c"
@@ -74,6 +79,31 @@ def hypotheses(q: Question) -> tuple[list[str], list[Any]]:
         return texts, opts
     levels = list(q.criteria)  # type: ignore[arg-type]
     return [f"{stem} Answer: {describe(lv)}." for lv in levels], levels
+
+
+def _clean_bias(raw: Any) -> dict[str, float]:
+    """Decision biases from a model's config, keeping only values we could have produced.
+
+    A model directory can come from the Hub, so its ``kenning.json`` is not ours by construction. A
+    NaN or a wild value here would quietly skew every decision the model makes rather than failing,
+    so anything non-finite, outside the fitted grid, or for a question type that cannot take a bias
+    is dropped with a warning instead of reaching the request path.
+    """
+    out: dict[str, float] = {}
+    for key, value in (raw or {}).items():
+        if key not in BIAS_TYPES:
+            print(f"[kenning] ignoring bias for {key!r}: only {', '.join(BIAS_TYPES)} take one", flush=True)
+            continue
+        try:
+            b = float(value)
+        except (TypeError, ValueError):
+            print(f"[kenning] ignoring bias {value!r} for {key}: not a number", flush=True)
+            continue
+        if not math.isfinite(b) or abs(b) > BIAS_LIMIT:
+            print(f"[kenning] ignoring bias {b} for {key}: outside +-{BIAS_LIMIT}", flush=True)
+            continue
+        out[key] = b
+    return out
 
 
 def make_deterministic() -> None:
@@ -139,6 +169,10 @@ class Kenning:
         local = local_dir(self.path)
         self.config: dict[str, Any] = read_config(local)
         self.temperature: dict[str, float] = {"noul": 1.0, "choice": 1.0, "score": 1.0, **self.config.get("temperature", {})}
+        # Decision bias, in post-temperature logit units, added to the first option ("yes"). Temperature
+        # cannot move a two-option boundary -- p >= 0.5 is the same test as score_yes >= score_no -- so
+        # this is the only term that can. Absent or 0.0 leaves behaviour exactly as before.
+        self.bias: dict[str, float] = {k: 0.0 for k in BIAS_TYPES} | _clean_bias(self.config.get("bias"))
         self.name = self.config.get("name") or Path(self.path).name or self.path
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         dtype = torch.bfloat16 if self.device.startswith("cuda") else torch.float32
@@ -204,6 +238,9 @@ class Kenning:
         for qid, q, options, start, n in groups:
             t = self.temperature.get(q.type, 1.0)
             z = [s / t for s in flat[start:start + n]]
+            b = self.bias.get(q.type, 0.0) if q.type in BIAS_TYPES else 0.0
+            if b:
+                z[0] += b
             m = max(z)
             probs = [math.exp(x - m) for x in z]
             if q.type == "noul":

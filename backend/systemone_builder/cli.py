@@ -332,10 +332,14 @@ def cmd_calibrate(a: argparse.Namespace) -> int:
         b, f = report["before"][kind], report["after"][kind]
         t0, t1 = report["temperature_before"].get(kind), report["temperature_after"].get(kind)
         temps = f"T {t0} -> {t1}  " if kind != "all" else " " * (len(f"T {t0} -> {t1}  ") if t0 else 0)
-        print(f"  {kind:<7} n={b['n']:<5} {temps}accuracy {b['accuracy']:.3f}  ECE {b['ece']:.3f} -> {f['ece']:.3f}  "
-              f"NLL {b['nll']:.3f} -> {f['nll']:.3f}")
+        # a bias, unlike a temperature, can change which answer wins, so accuracy is shown both ways
+        bz = (report.get("bias_before") or {}).get(kind)
+        bo = (report.get("bias_after") or {}).get(kind)
+        bias = f"bias {bz} -> {bo}  " if bo is not None and kind != "all" else ""
+        print(f"  {kind:<7} n={b['n']:<5} {temps}{bias}accuracy {b['accuracy']:.3f} -> {f['accuracy']:.3f}  "
+              f"ECE {b['ece']:.3f} -> {f['ece']:.3f}  NLL {b['nll']:.3f} -> {f['nll']:.3f}")
     if not a.write:
-        print("dry run: add --write to save the new temperatures")
+        print("dry run: add --write to save the new temperatures and biases")
         return 0
     dst = src
     if a.save_as:
