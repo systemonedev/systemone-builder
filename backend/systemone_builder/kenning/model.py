@@ -139,6 +139,10 @@ class Kenning:
         local = local_dir(self.path)
         self.config: dict[str, Any] = read_config(local)
         self.temperature: dict[str, float] = {"noul": 1.0, "choice": 1.0, "score": 1.0, **self.config.get("temperature", {})}
+        # Decision bias, in post-temperature logit units, added to the first option ("yes"). Temperature
+        # cannot move a two-option boundary -- p >= 0.5 is the same test as score_yes >= score_no -- so
+        # this is the only term that can. Absent or 0.0 leaves behaviour exactly as before.
+        self.bias: dict[str, float] = {"noul": 0.0, **(self.config.get("bias") or {})}
         self.name = self.config.get("name") or Path(self.path).name or self.path
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         dtype = torch.bfloat16 if self.device.startswith("cuda") else torch.float32
@@ -204,6 +208,9 @@ class Kenning:
         for qid, q, options, start, n in groups:
             t = self.temperature.get(q.type, 1.0)
             z = [s / t for s in flat[start:start + n]]
+            b = self.bias.get(q.type, 0.0)
+            if b and q.type == "noul":
+                z[0] += b
             m = max(z)
             probs = [math.exp(x - m) for x in z]
             if q.type == "noul":

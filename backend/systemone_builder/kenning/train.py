@@ -108,14 +108,25 @@ def evaluate(model: Any, tok: Any, groups: list[dict[str, Any]], pos: int, max_l
     return metrics(raw, temps or {}), raw
 
 
-def _softmax(z: list[float], t: float) -> list[float]:
-    m = max(x / t for x in z)
-    e = [math.exp(x / t - m) for x in z]
+def _softmax(z: list[float], t: float, bias: float = 0.0) -> list[float]:
+    """``softmax(z / t)``, with ``bias`` added to the first option afterwards.
+
+    Temperature cannot move a decision. For a two-option question ``p >= 0.5`` is equivalent to
+    ``z[0] >= z[1]``, which is unchanged by dividing both by ``t``, so temperature can fix how sure
+    the probabilities look and never which answer wins. ``bias`` is the term that moves the boundary:
+    it is in post-temperature logit units, and positive values favour the first option ("yes").
+    """
+    zz = [x / t for x in z]
+    if bias:
+        zz[0] += bias
+    m = max(zz)
+    e = [math.exp(x - m) for x in zz]
     s = sum(e)
     return [x / s for x in e]
 
 
-def metrics(raw: list[tuple[str, list[float], list[float]]], temps: dict[str, float]) -> dict[str, Any]:
+def metrics(raw: list[tuple[str, list[float], list[float]]], temps: dict[str, float],
+            biases: dict[str, float] | None = None) -> dict[str, Any]:
     out: dict[str, Any] = {}
     for kind in [*sorted({k for k, _, _ in raw}), "all"]:
         rows = [r for r in raw if kind == "all" or r[0] == kind]
@@ -125,7 +136,7 @@ def metrics(raw: list[tuple[str, list[float], list[float]]], temps: dict[str, fl
         conf: list[float] = []
         hit: list[float] = []
         for k, s, y in rows:
-            p = _softmax(s, temps.get(k, 1.0))
+            p = _softmax(s, temps.get(k, 1.0), (biases or {}).get(k, 0.0))
             top = max(range(len(p)), key=p.__getitem__)
             truth = max(range(len(y)), key=y.__getitem__)
             acc += float(top == truth)
@@ -140,6 +151,31 @@ def metrics(raw: list[tuple[str, list[float], list[float]]], temps: dict[str, fl
             if idx:
                 ece += len(idx) / n * abs(sum(conf[i] for i in idx) / len(idx) - sum(hit[i] for i in idx) / len(idx))
         out[kind] = {"n": n, "accuracy": acc / n, "nll": nll / n, "brier": brier / n, "ece": ece}
+    return out
+
+
+# Only two-option questions take a bias: for choice and score the option order is not fixed, so a
+# scalar on "the first option" would mean something different from one question to the next.
+BIAS_TYPES = ("noul",)
+
+
+def fit_biases(raw: list[tuple[str, list[float], list[float]]], temps: dict[str, float]) -> dict[str, float]:
+    """Per question type, the first-option bias with the lowest held-out NLL at the fitted temperature.
+
+    Fitted after the temperatures, on the same held-out data, because the two do different jobs:
+    temperature sets how sure the answer looks and bias sets which side of the threshold it lands on.
+    """
+    grid = [x / 20 for x in range(-80, 81)]  # -4.00 .. 4.00 in 0.05 steps
+    out: dict[str, float] = {}
+    for kind in {k for k, _, _ in raw} & set(BIAS_TYPES):
+        rows = [(s, y) for k, s, y in raw if k == kind]
+        t = temps.get(kind, 1.0)
+
+        def nll(b: float) -> float:
+            return -sum(sum(yi * math.log(max(pi, 1e-12)) for yi, pi in zip(y, _softmax(s, t, b)))
+                        for s, y in rows)
+
+        out[kind] = round(min(grid, key=nll), 4)
     return out
 
 
@@ -264,9 +300,11 @@ def main(argv: list[str] | None = None) -> int:
 
     after_raw_metrics, raw = evaluate(model, tok, val, pos, a.max_length, device)
     temps = fit_temperatures(raw)
-    after = metrics(raw, temps)
+    biases = fit_biases(raw, temps)
+    after = metrics(raw, temps, biases)
     print(f"[kenning-train] trained held-out (T=1): {json.dumps(after_raw_metrics['all'])}", flush=True)
-    print(f"[kenning-train] calibrated held-out (T={temps}): {json.dumps(after['all'])}", flush=True)
+    print(f"[kenning-train] calibrated held-out (T={temps}, bias={biases}): {json.dumps(after['all'])}",
+          flush=True)
 
     a.out.mkdir(parents=True, exist_ok=True)
     model.to(torch.bfloat16).save_pretrained(a.out, safe_serialization=True)
@@ -278,6 +316,7 @@ def main(argv: list[str] | None = None) -> int:
         "positive_index": pos,
         "max_length": a.max_length,
         "temperature": temps,
+        "bias": biases,
         "trained_on": str(a.data),
         "train_groups": len(train),
         "heldout": {"zero_shot": before, "trained": after_raw_metrics, "calibrated": after},
