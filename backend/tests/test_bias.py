@@ -7,9 +7,14 @@ its boundary sat at 0.621. Temperature cannot correct that, for the reason the f
 
 from __future__ import annotations
 
+import asyncio
 import math
 
+import httpx
+
+from systemone_builder.kenning import calibrate as calibrate_mod
 from systemone_builder.kenning.calibrate import scores_from
+from systemone_builder.kenning.model import BIAS_TYPES, _clean_bias
 from systemone_builder.kenning.train import _softmax, fit_biases, fit_temperatures, metrics
 
 
@@ -101,3 +106,56 @@ def test_scores_from_without_a_bias_is_unchanged():
     answer = {"type": "noul", "noul": _softmax(scores, t)[0]}
     _, recovered = scores_from(answer, t)
     assert math.isclose(recovered[0] - recovered[1], scores[0] - scores[1], abs_tol=1e-9)
+
+
+def test_collect_removes_the_served_bias(monkeypatch):
+    """The real refit path, not just scores_from.
+
+    `collect` took a `biases` argument and never passed it on, so a refit against an already-biased
+    model sat on top of the served bias and doubled it. Asserting on `scores_from` alone did not
+    catch that, because it skips the function that had the bug.
+    """
+    scores, t, b = [0.7, 1.2], 1.5, 0.6
+    served = _softmax(scores, t, b)[0]
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"model": "m", "answers": {"q": {"type": "noul", "noul": served}}})
+
+    real = httpx.AsyncClient
+
+    def fake(*args, **kwargs):
+        kwargs.pop("transport", None)
+        return real(*args, transport=httpx.MockTransport(handler), **kwargs)
+
+    monkeypatch.setattr(calibrate_mod.httpx, "AsyncClient", fake)
+    rows = [{"state": {"x": "."}, "questions": {"q": {"type": "noul", "instructions": "?"}}, "targets": {"q": 1}}]
+
+    raw, _ = asyncio.run(calibrate_mod.collect("http://served", rows, {"noul": t}, {"noul": b}))
+    _, recovered, _ = raw[0]
+    assert math.isclose(recovered[0] - recovered[1], scores[0] - scores[1], abs_tol=1e-9), (
+        "collect did not undo the served bias; a second calibration would double it")
+
+    # and with the bias withheld the gap is wrong by exactly T * bias, which is the bug it hides
+    raw_bad, _ = asyncio.run(calibrate_mod.collect("http://served", rows, {"noul": t}, None))
+    _, bad, _ = raw_bad[0]
+    assert math.isclose((bad[0] - bad[1]) - (scores[0] - scores[1]), t * b, abs_tol=1e-9)
+
+
+def test_clean_bias_drops_values_we_could_not_have_produced():
+    assert _clean_bias({"noul": 0.4}) == {"noul": 0.4}
+    assert _clean_bias({"noul": "0.4"}) == {"noul": 0.4}          # coerced
+    assert _clean_bias(None) == {}
+    assert _clean_bias({"choice": 0.5}) == {}                      # not a two-option type
+    assert _clean_bias({"noul": float("nan")}) == {}               # non-finite
+    assert _clean_bias({"noul": float("inf")}) == {}
+    assert _clean_bias({"noul": 99.0}) == {}                       # outside the fitted grid
+    assert _clean_bias({"noul": "wat"}) == {}                      # not a number
+
+
+def test_metrics_only_biases_the_types_serving_biases():
+    """Evaluation and serving must gate on the same set, or reported numbers are not the served ones."""
+    raw = [("choice", [0.2, 0.9], [0.0, 1.0])] * 20
+    temps = fit_temperatures(raw)
+    rogue = {"choice": 3.0}                                        # a bias serving would ignore
+    assert "choice" not in BIAS_TYPES
+    assert metrics(raw, temps, rogue)["choice"] == metrics(raw, temps)["choice"]

@@ -21,7 +21,7 @@ from typing import Any
 import httpx
 
 from systemone_builder.kenning.importer import load_rows
-from systemone_builder.kenning.model import CONFIG_FILE, read_config
+from systemone_builder.kenning.model import BIAS_TYPES, CONFIG_FILE, read_config
 from systemone_builder.kenning.train import fit_biases, fit_temperatures, metrics
 from systemone_builder.system_one.contract import Question
 
@@ -69,7 +69,8 @@ async def collect(url: str, rows: list[dict[str, Any]], temps: dict[str, float],
         models.add(body.get("model", ""))
         for qid, t in row["targets"].items():
             q = Question.model_validate(row["questions"][qid])
-            options, scores = scores_from(body["answers"][qid], temps.get(q.type, 1.0))
+            options, scores = scores_from(body["answers"][qid], temps.get(q.type, 1.0),
+                                          (biases or {}).get(q.type, 0.0))
             if q.type == "score":  # levels come back keyed "0", "1", ...
                 options = [str(o) for o in options]
             raw.append((q.type, scores, _vector(q, options, t)))
@@ -94,7 +95,7 @@ def calibrate(model_dir: Path, data: Path, url: str) -> dict[str, Any]:
         raise ValueError(f"the model served at {url} is {', '.join(sorted(models)) or 'unknown'}, not {name}: "
                          "activate it first (Models page) so its answers are the ones being calibrated")
     new = {**old, **fit_temperatures(raw)}
-    new_bias = {**old_bias, **fit_biases(raw, new)}
+    new_bias = {k: v for k, v in {**old_bias, **fit_biases(raw, new)}.items() if k in BIAS_TYPES}
     return {"model": name, "data": data.name, "questions": len(raw), "temperature_before": old,
             "temperature_after": new, "bias_before": old_bias, "bias_after": new_bias,
             "before": metrics(raw, old, old_bias), "after": metrics(raw, new, new_bias)}
@@ -107,7 +108,8 @@ def save(model_dir: Path, report: dict[str, Any], name: str | None = None) -> No
     history.append({"temperature": report["temperature_before"], "bias": report.get("bias_before"),
                     "replaced": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
     config.update({"temperature": report["temperature_after"],
-                   "bias": report.get("bias_after") or config.get("bias") or {},
+                   # explicit: an empty dict means "no bias", not "keep whatever was there"
+                   "bias": report["bias_after"],
                    "calibration_history": history,
                    "calibration": {k: report[k] for k in ("data", "questions", "before", "after")}})
     if name:

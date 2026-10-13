@@ -33,7 +33,7 @@ from pathlib import Path
 from typing import Any
 
 from systemone_builder.system_one.contract import Question
-from systemone_builder.kenning.model import CONFIG_FILE, DEFAULT_BASE, TEMPLATE_VERSION, entailment_index, hypotheses, make_deterministic, pair_scores
+from systemone_builder.kenning.model import BIAS_TYPES, CONFIG_FILE, DEFAULT_BASE, TEMPLATE_VERSION, entailment_index, hypotheses, make_deterministic, pair_scores
 
 
 # ------------------------------------------------------------------- data
@@ -136,7 +136,8 @@ def metrics(raw: list[tuple[str, list[float], list[float]]], temps: dict[str, fl
         conf: list[float] = []
         hit: list[float] = []
         for k, s, y in rows:
-            p = _softmax(s, temps.get(k, 1.0), (biases or {}).get(k, 0.0))
+            b = (biases or {}).get(k, 0.0) if k in BIAS_TYPES else 0.0
+            p = _softmax(s, temps.get(k, 1.0), b)
             top = max(range(len(p)), key=p.__getitem__)
             truth = max(range(len(y)), key=y.__getitem__)
             acc += float(top == truth)
@@ -152,11 +153,6 @@ def metrics(raw: list[tuple[str, list[float], list[float]]], temps: dict[str, fl
                 ece += len(idx) / n * abs(sum(conf[i] for i in idx) / len(idx) - sum(hit[i] for i in idx) / len(idx))
         out[kind] = {"n": n, "accuracy": acc / n, "nll": nll / n, "brier": brier / n, "ece": ece}
     return out
-
-
-# Only two-option questions take a bias: for choice and score the option order is not fixed, so a
-# scalar on "the first option" would mean something different from one question to the next.
-BIAS_TYPES = ("noul",)
 
 
 def fit_biases(raw: list[tuple[str, list[float], list[float]]], temps: dict[str, float]) -> dict[str, float]:
