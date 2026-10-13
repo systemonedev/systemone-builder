@@ -24,7 +24,14 @@ from typing import Any, Callable
 from systemone_builder.kenning.synthetic_tasks import Attr, questions_for
 
 Case = tuple[Any, list[Attr], dict[str, str]]
-YN = {"yes": "", "no": ""}
+def yn(when_true: str, when_false: str) -> dict[str, str]:
+    """yes/no labels carrying the rule's boundary.
+
+    These generators know their rule exactly, so the two sides can state it exactly. Without
+    descriptions ``criteria.noul`` has nothing to attach and the question goes out bare, which is
+    what left the structured families (our weakest) at 7% criteria coverage.
+    """
+    return {"yes": when_true, "no": when_false}
 
 
 def _yn(b: bool) -> str:
@@ -68,11 +75,15 @@ def expense_case(rng: random.Random) -> Case:
                     "receipt_attached": receipt},
     }
     attrs = [
-        Attr("within_policy", ["Does this expense comply with the policy?", "Can this expense be reimbursed as submitted?"], YN),
+        Attr("within_policy", ["Does this expense comply with the policy?", "Can this expense be reimbursed as submitted?"],yn(
+             "Every rule holds: within the category cap, a receipt where one is required, and submitted inside the window.",
+             "At least one rule fails: over the cap, no receipt where one is required, or submitted after the deadline.")),
         Attr("violation", ["Which rule, if any, does this expense break first?", "What is wrong with this expense claim?"],
              {"none": "complies", "over_cap": "amount above the category cap", "missing_receipt": "no receipt where one is required",
               "late_submission": "submitted after the deadline"}),
-        Attr("manager_approval", ["Does this expense need a manager's approval?"], YN),
+        Attr("manager_approval", ["Does this expense need a manager's approval?"],yn(
+             "The amount is above the manager-approval threshold in the policy.",
+             "The amount is at or below that threshold, whatever else may be wrong with the claim.")),
     ]
     return state, attrs, {"within_policy": _yn(found == "none"), "violation": found,
                           "manager_approval": _yn(amount > manager_over)}
@@ -107,11 +118,15 @@ def shipping_case(rng: random.Random) -> Case:
                   "address": "12 Harbour St, Leeds LS1 4AP" if address_ok else "12 Harbour St"},
     }
     attrs = [
-        Attr("can_ship", ["Can this order ship with the chosen service?", "Is this shipment allowed?"], YN),
+        Attr("can_ship", ["Can this order ship with the chosen service?", "Is this shipment allowed?"],yn(
+             "Nothing blocks it: within the service weight limit, contents allowed, and a complete address.",
+             "Something blocks it: too heavy for the service, contents not allowed, or an incomplete address.")),
         Attr("blocking_issue", ["What stops this order from shipping?"],
              {"none": "nothing", "overweight": "too heavy for the service", "restricted_contents": "contents not allowed",
               "incomplete_address": "address is incomplete"}),
-        Attr("ships_today", ["Will this order ship today?"], YN),
+        Attr("ships_today", ["Will this order ship today?"],yn(
+             "It can ship at all, and the order was placed before the cutoff hour.",
+             "Either something blocks the shipment, or it was placed after the cutoff.")),
     ]
     return state, attrs, {"can_ship": _yn(can_ship), "blocking_issue": issue,
                           "ships_today": _yn(can_ship and order_time.hour < cutoff)}
@@ -132,7 +147,9 @@ def leave_case(rng: random.Random) -> Case:
     state = {"policy": {"notice_days_per_leave_day": notice_per_day, "blackout": f"{_d(blackout[0])} to {_d(blackout[1])}"},
              "employee": {"leave_balance_days": balance},
              "request": {"submitted": _d(today), "first_day": _d(start), "last_day": _d(end), "working_days": days}}
-    attrs = [Attr("approve", ["Should this leave request be approved?", "Does the request meet the leave policy?"], YN),
+    attrs = [Attr("approve", ["Should this leave request be approved?", "Does the request meet the leave policy?"],yn(
+             "Enough balance left, enough notice given, and no overlap with a blackout period.",
+             "One of those fails: not enough days left, too little notice, or it overlaps a blackout period.")),
              Attr("decision", ["What is the outcome of this leave request?"],
                   {"approved": "", "insufficient_balance": "not enough days left", "short_notice": "not enough notice",
                    "blackout_period": "overlaps a blackout period"})]
@@ -156,8 +173,12 @@ def inventory_case(rng: random.Random) -> Case:
     state = {"rule": "reorder when on_hand is at or below reorder_point; an item runs out before a new order "
                      "arrives when on_hand / daily_usage is less than lead_time_days",
              "inventory": items, "question_about": target["item"]}
-    attrs = [Attr("needs_reorder", [f"Does {target['item']} need to be reordered?"], YN),
-             Attr("stockout_risk", [f"Will {target['item']} run out before a new order arrives?"], YN),
+    attrs = [Attr("needs_reorder", [f"Does {target['item']} need to be reordered?"],yn(
+             "On-hand is at or below the item's reorder point.",
+             "On-hand is still above the reorder point.")),
+             Attr("stockout_risk", [f"Will {target['item']} run out before a new order arrives?"],yn(
+             "On-hand divided by daily usage is less than the lead time, so it runs out before a new order lands.",
+             "The stock on hand lasts at least as long as the lead time.")),
              Attr("urgency", [f"How urgent is restocking {target['item']}?"],
                   {"none": "above the reorder point", "soon": "at or below the reorder point",
                    "critical": "runs out before a new order can arrive"}, ordinal=True)]
@@ -178,7 +199,9 @@ def incident_case(rng: random.Random) -> Case:
              "incident": {"severity": sev, "opened_at": opened.strftime("%Y-%m-%d %H:%M")} | (
                  {"first_response_at": at.strftime("%Y-%m-%d %H:%M")} if responded else
                  {"status": "no response yet", "now": at.strftime("%Y-%m-%d %H:%M")})}
-    attrs = [Attr("sla_breached", ["Was the first-response SLA missed?" if responded else "Has the first-response SLA been breached?"], YN)]
+    attrs = [Attr("sla_breached", ["Was the first-response SLA missed?" if responded else "Has the first-response SLA been breached?"],yn(
+             "The first response came later than the SLA allows, or none has come and the SLA has already run out.",
+             "The first response was inside the SLA, or the SLA has not run out yet."))]
     labels = {"sla_breached": _yn(breached)}
     if not responded:
         attrs.append(Attr("time_pressure", ["How close is this incident to breaching its SLA?"],
@@ -205,7 +228,9 @@ def eligibility_case(rng: random.Random) -> Case:
     reason = "too_young" if age < min_age else "country_not_supported" if country not in allowed else "eligible"
     state = {"product": product, "minimum_age": min_age, "available_in": allowed, "today": _d(today),
              "applicant": {"date_of_birth": _d(dob), "country": country}}
-    attrs = [Attr("eligible", [f"Is the applicant eligible for the {product}?"], YN),
+    attrs = [Attr("eligible", [f"Is the applicant eligible for the {product}?"],yn(
+             "The applicant meets the minimum age and their country is on the available list.",
+             "Either below the minimum age, or in a country the product is not available in.")),
              Attr("reason", ["Why is the applicant eligible or not?"],
                   {"eligible": "", "too_young": "below the minimum age", "country_not_supported": "country not supported"})]
     return state, attrs, {"eligible": _yn(reason == "eligible"), "reason": reason}
@@ -226,7 +251,9 @@ def loan_case(rng: random.Random) -> Case:
                           "max_amount": f"{mult} x monthly income"},
              "applicant": {"monthly_income_usd": income, "monthly_debt_payments_usd": debt, "credit_score": score,
                            "requested_amount_usd": amount}}
-    attrs = [Attr("prequalified", ["Does the applicant pre-qualify?", "Does this application meet every criterion?"], YN),
+    attrs = [Attr("prequalified", ["Does the applicant pre-qualify?", "Does this application meet every criterion?"],yn(
+             "Every criterion passes: credit score, debt-to-income, and the requested amount.",
+             "At least one fails: score too low, debt-to-income too high, or the amount above the income multiple.")),
              Attr("first_failed_check", ["Which criterion fails first, in the order listed?"],
                   {"prequalified": "none fails", "credit_score": "", "debt_to_income": "", "amount_too_high": ""})]
     return state, attrs, {"prequalified": _yn(reason == "prequalified"), "first_failed_check": reason}
@@ -243,7 +270,9 @@ def subscription_case(rng: random.Random) -> Case:
                                               "card_on_file": card, "cancellation_requested": cancelled},
              "billing_rule": "at the end of the trial, accounts with a card on file and no cancellation are charged; "
                              "others are downgraded to free"}
-    attrs = [Attr("trial_ending_soon", ["Does the trial end within the next 7 days?"], YN),
+    attrs = [Attr("trial_ending_soon", ["Does the trial end within the next 7 days?"],yn(
+             "The trial ends within the next seven days and has not ended yet.",
+             "More than seven days left, or the trial is already over.")),
              Attr("outcome", ["What happens when the trial ends?"],
                   {"charged": "moves to the paid plan", "downgraded": "moves to the free plan",
                    "already_ended": "the trial is already over"})]
@@ -331,7 +360,9 @@ def table_case(rng: random.Random) -> Case:
     best = max(rows, key=lambda r: r[idx])
     ties = sum(r[idx] == best[idx] for r in rows)
     state = {"table": _render_table(cols, rows, rng), "statement": stmt}
-    attrs = [Attr("statement_true", ["Is the statement true according to the table?", "Does the table support the statement?"], YN)]
+    attrs = [Attr("statement_true", ["Is the statement true according to the table?", "Does the table support the statement?"],yn(
+             "The table's own figures bear the statement out exactly.",
+             "The table gives a different figure, or a different row, than the statement claims."))]
     labels = {"statement_true": _yn(truth)}
     if ties == 1 and len(rows) <= 8:
         attrs.append(Attr("top_row", [f"Which {key} has the highest {col}?"], {r[0]: "" for r in rows}))
@@ -393,7 +424,9 @@ def tool_call_case(rng: random.Random) -> Case:
     state = {"available_functions": {f: FUNCTIONS[f] for f in avail}, "user_request": req,
              "proposed_call": {"name": call_fn, "arguments": call_args}}
     attrs = [Attr("call_correct", ["Does the proposed call do exactly what the user asked?",
-                                   "Is this function call correct for the request?"], YN),
+                                   "Is this function call correct for the request?"],yn(
+             "The right function, with every needed argument present and carrying the right value.",
+             "The wrong function, an argument with the wrong value, or a needed argument missing.")),
              Attr("call_problem", ["What is wrong with the proposed call?"],
                   {"none": "it is correct", "wrong_function": "calls the wrong function",
                    "wrong_argument": "an argument has the wrong value", "missing_argument": "a needed argument is missing"})]
@@ -418,12 +451,16 @@ def agent_trace_case(rng: random.Random) -> Case:
                           "result": {"ok": True}})
     final = ("Done!" if outcome != "unfinished" else "Let me look into that.")
     state = {"user_request": req, "steps": steps, "agent_final_message": final}
-    attrs = [Attr("task_completed", ["Did the agent complete what the user asked?"], YN),
+    attrs = [Attr("task_completed", ["Did the agent complete what the user asked?"],yn(
+             "The agent actually carried out what was asked, even if it also did something extra.",
+             "It stopped before doing the task, acted on the wrong details, or claimed success after an error.")),
              Attr("issue", ["What went wrong in this run, if anything?"],
                   {"none": "done correctly", "wrong_details": "acted with the wrong details",
                    "ignored_error": "claimed success after an error", "stopped_early": "never did the task",
                    "unrequested_action": "did something the user didn't ask for"}),
-             Attr("needs_user_attention", ["Should the user be told something went wrong?"], YN)]
+             Attr("needs_user_attention", ["Should the user be told something went wrong?"],yn(
+             "Something went wrong worth telling the user: wrong details, an ignored error, an unfinished task, or an unrequested action.",
+             "The run did what was asked, with nothing worth reporting."))]
     issue = {"completed": "none", "wrong_details": "wrong_details", "error_ignored": "ignored_error",
              "unfinished": "stopped_early", "extra_action": "unrequested_action"}[outcome]
     return state, attrs, {"task_completed": _yn(outcome in ("completed", "extra_action")), "issue": issue,
@@ -465,8 +502,12 @@ def access_log_case(rng: random.Random) -> Case:
     brute = any(v >= 5 for v in logins_failed.values())
     state = {"rules": f"alert when more than {thr}% of requests return 5xx; brute force is 5 or more failed "
                       "logins (401 on /api/login) from one IP", "access_log": "\n".join(lines)}
-    attrs = [Attr("error_alert", ["Should the 5xx alert fire for this window?"], YN),
-             Attr("brute_force", ["Is there a brute-force login attempt in this log?"], YN)]
+    attrs = [Attr("error_alert", ["Should the 5xx alert fire for this window?"],yn(
+             "The share of requests returning 5xx is above the threshold in the rules.",
+             "The 5xx share is at or below that threshold.")),
+             Attr("brute_force", ["Is there a brute-force login attempt in this log?"],yn(
+             "One single IP reaches five or more failed logins on the login endpoint.",
+             "No single IP reaches five failed logins, however many there are across the log."))]
     labels = {"error_alert": _yn(rate > thr), "brute_force": _yn(brute)}
     if worst:
         attrs.append(Attr("worst_endpoint", ["Which endpoint returned the most 5xx errors?"],
@@ -497,8 +538,12 @@ def deploy_log_case(rng: random.Random) -> Case:
     rollback = after >= 3 and after > 2 * max(before, 1)
     state = {"rule": "roll back when there are at least 3 errors after the deploy and more than twice as many as before it",
              "log": "\n".join(out)}
-    attrs = [Attr("rollback", ["Should this deploy be rolled back?"], YN),
-             Attr("errors_after_deploy", ["Are there more errors after the deploy than before it?"], YN)]
+    attrs = [Attr("rollback", ["Should this deploy be rolled back?"],yn(
+             "At least three errors after the deploy, and more than twice as many as before it.",
+             "Fewer than three errors after the deploy, or not more than twice the number before it.")),
+             Attr("errors_after_deploy", ["Are there more errors after the deploy than before it?"],yn(
+             "More error lines after the deploy line than before it.",
+             "The same number or fewer after the deploy than before it."))]
     return state, attrs, {"rollback": _yn(rollback), "errors_after_deploy": _yn(after > before)}
 
 

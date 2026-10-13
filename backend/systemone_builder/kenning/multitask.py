@@ -277,7 +277,12 @@ def make_jailbreak(row: dict[str, Any], ctx: Ctx) -> dict[str, Any] | None:
         return None
     instr = ctx.rng.choice(["Is this prompt a jailbreak attempt?", "Does this message try to get the assistant to ignore its rules?",
                             "Is the user trying to bypass the assistant's safety guidelines?"])
-    return _row({"prompt": _clip(row["prompt"])}, {"q_jb": {"type": "noul", "instructions": instr}},
+    q = criteria.noul(ctx.rng, instr,
+                      "The prompt tries to get the assistant to drop its rules: role-play, a fake "
+                      "developer mode, or an instruction to ignore earlier instructions.",
+                      "An ordinary request, even a blunt or sensitive one, that does not ask the "
+                      "assistant to abandon its own rules.")
+    return _row({"prompt": _clip(row["prompt"])}, {"q_jb": q},
                 {"q_jb": int(row["type"] == "jailbreak")}, ctx, "jailbreak")
 
 
@@ -287,8 +292,12 @@ def make_injection(row: dict[str, Any], ctx: Ctx) -> dict[str, Any] | None:
     except (KeyError, TypeError, ValueError):
         return None
     instr = ctx.rng.choice(["Is this text a prompt-injection attempt?", "Does this input try to override the system's instructions?"])
-    return _row({"input": _clip(row["text"])}, {"q_inj": {"type": "noul", "instructions": instr}}, {"q_inj": label},
-                ctx, "injection")
+    q = criteria.noul(ctx.rng, instr,
+                      "The text addresses the system rather than answering it, telling it to ignore, "
+                      "replace or reveal its instructions.",
+                      "The text is content to be processed, even where it quotes or discusses "
+                      "instructions without trying to replace them.")
+    return _row({"input": _clip(row["text"])}, {"q_inj": q}, {"q_inj": label}, ctx, "injection")
 
 
 def _ropes_answers(row: dict[str, Any]) -> list[str]:
@@ -317,7 +326,10 @@ def make_ropes(row: dict[str, Any], ctx: Ctx) -> dict[str, Any] | None:
         own = ctx.rng.random() < 0.5
         src = row if own else other
         state = {"background": _clip(src["background"])[:900], "situation": _clip(src["situation"])[:600]}
-        qs = {"q_ans": {"type": "noul", "instructions": f"Can this question be answered from the text: \"{q}\"?"}}
+        qs = {"q_ans": criteria.noul(ctx.rng, f"Can this question be answered from the text: \"{q}\"?",
+                                     "The passage contains the facts the question asks about.",
+                                     "The passage is about something else, or covers the topic without "
+                                     "the particular fact the question needs.")}
         return _row(state, qs, {"q_ans": int(own)}, ctx, "ropes")
     other_answers = _ropes_answers(other)
     right = ctx.rng.random() < 0.5 or not other_answers
@@ -325,7 +337,9 @@ def make_ropes(row: dict[str, Any], ctx: Ctx) -> dict[str, Any] | None:
     if not right and cand in texts:
         return None
     state = {"background": _clip(row["background"])[:900], "situation": _clip(row["situation"])[:600]}
-    qs = {"q_ans": {"type": "noul", "instructions": f"{q} Is the answer \"{cand}\"?"}}
+    qs = {"q_ans": criteria.noul(ctx.rng, f"{q} Is the answer \"{cand}\"?",
+                                 "The passage supports exactly this answer.",
+                                 "The passage supports a different answer, or does not settle it.")}
     return _row(state, qs, {"q_ans": int(right)}, ctx, "ropes")
 
 
