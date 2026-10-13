@@ -331,7 +331,15 @@ def question_metrics(qid: str, q: Question, suite: Suite, results: list[dict[str
         out.update(accuracy=statistics.fmean(correct), mean_top_probability=statistics.fmean(top), ece=ece(top, correct))
     else:
         answers = [ScoreAnswer.model_validate(a) for a, _ in rows]
-        out.update(mae=statistics.fmean(abs(a.score - float(y)) for a, (_, y) in zip(answers, rows)),
+
+        def picked(a: ScoreAnswer) -> int | None:
+            # The level the model actually picks, as choice does. ``score`` is an expected value, so
+            # round()ing it scores a hedged-but-right distribution as wrong and penalises only
+            # engines that answer with a distribution rather than a hard level.
+            return int(max(a.probabilities, key=lambda k: a.probabilities[k])) if a.probabilities else None
+
+        out.update(accuracy=statistics.fmean(float(picked(a) == int(y)) for a, (_, y) in zip(answers, rows)),
+                   mae=statistics.fmean(abs(a.score - float(y)) for a, (_, y) in zip(answers, rows)),
                    exact_level=statistics.fmean(float(round(a.score) == int(y)) for a, (_, y) in zip(answers, rows)))
     return out
 

@@ -53,8 +53,17 @@ def hypotheses(q: Question) -> tuple[list[str], list[Any]]:
     """Hypothesis texts for one question and the options they stand for."""
     stem = q.instructions.strip()
     if q.type == "noul":
-        crit = describe(q.criteria)
-        suffix = f" ({crit})" if crit else ""
+        # A {"true": ..., "false": ...} criteria dict describes the two *answers*, so each
+        # hypothesis gets only its own side (as choice does). Folding both into both leaves the
+        # pair identical apart from "yes."/"no.", which is no signal at all.
+        crit = q.criteria
+        if isinstance(crit, dict) and ({"true", "false"} & set(crit) or {"yes", "no"} & set(crit)):
+            yes_d = describe(crit.get("true", crit.get("yes")))
+            no_d = describe(crit.get("false", crit.get("no")))
+            return ([f"{stem} Answer: yes." + (f" {yes_d}" if yes_d else ""),
+                     f"{stem} Answer: no." + (f" {no_d}" if no_d else "")], ["yes", "no"])
+        shared = describe(crit)
+        suffix = f" ({shared})" if shared else ""
         return [f"{stem}{suffix} Answer: yes.", f"{stem}{suffix} Answer: no."], ["yes", "no"]
     if q.type == "choice":
         opts = list(q.criteria)  # type: ignore[arg-type]
@@ -140,8 +149,32 @@ class Kenning:
         self.chunk = chunk
         self._lock = threading.Lock()
 
-    def scores(self, premise: str, hyps: list[str]) -> tuple[list[float], int]:
-        """Pair scores for one premise and many hypotheses, plus input tokens used."""
+    def _tok_len(self, text: str) -> int:
+        return len(self.tokenizer(text, add_special_tokens=False)["input_ids"])
+
+    def premises_for(self, premise: str, groups: list[tuple[str, Question, list[Any], int, int]],
+                     hyps: list[str]) -> list[str]:
+        """One premise per hypothesis, truncated to a budget shared by every option of its question.
+
+        ``truncation="only_first"`` trims the premise to whatever room each hypothesis leaves, so a
+        long option description would see less of the state than a short one -- and the group's
+        softmax would then compare scores taken over different evidence. Budgeting per question
+        keeps every option on identical evidence and makes the answer independent of how verbosely
+        the options happen to be written.
+        """
+        specials = self.tokenizer.num_special_tokens_to_add(pair=True)
+        prem_ids = self.tokenizer(premise, add_special_tokens=False)["input_ids"]
+        prems: list[str] = [premise] * len(hyps)
+        for _qid, _q, _options, start, n in groups:
+            budget = max(0, self.max_length - specials - max(self._tok_len(h) for h in hyps[start:start + n]))
+            text = (premise if len(prem_ids) <= budget
+                    else self.tokenizer.decode(prem_ids[:budget], skip_special_tokens=True))
+            for j in range(start, start + n):
+                prems[j] = text
+        return prems
+
+    def scores(self, premises: list[str], hyps: list[str]) -> tuple[list[float], int]:
+        """Pair scores for aligned premises and hypotheses, plus input tokens used."""
         import torch
 
         out: list[float] = []
@@ -149,8 +182,8 @@ class Kenning:
         with torch.inference_mode():
             for i in range(0, len(hyps), self.chunk):
                 part = hyps[i:i + self.chunk]
-                enc = self.tokenizer([premise] * len(part), part, truncation="only_first", max_length=self.max_length,
-                                     padding=True, return_tensors="pt").to(self.device)
+                enc = self.tokenizer(premises[i:i + self.chunk], part, truncation="only_first",
+                                     max_length=self.max_length, padding=True, return_tensors="pt").to(self.device)
                 tokens += int(enc["attention_mask"].sum())
                 logits = self.model(**enc).logits
                 out.extend(pair_scores(self.model, logits, self.positive_index).tolist())
@@ -166,7 +199,7 @@ class Kenning:
             groups.append((qid, q, options, len(hyps), len(texts)))
             hyps.extend(texts)
         with self._lock:
-            flat, tokens = self.scores(premise, hyps)
+            flat, tokens = self.scores(self.premises_for(premise, groups, hyps), hyps)
         answers: dict[str, Any] = {}
         for qid, q, options, start, n in groups:
             t = self.temperature.get(q.type, 1.0)
