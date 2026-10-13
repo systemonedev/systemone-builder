@@ -247,7 +247,7 @@ and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
 Code and Kenning weights: Apache-2.0 ([LICENSE](LICENSE), [NOTICE](NOTICE)). Each exported model
 ships with its licence and a `NOTICE.md` listing the base model and every training source with
 their licences. Models built on a base with non-commercial training data are marked as not
-Apache-2.0. Created by [Jesus Rodriguez](https://github.com/jesusdrodriguez); maintained by
+Apache-2.0. Created by [David Rodriguez](https://github.com/jesusdrodriguez); maintained by
 [systemonedev](https://github.com/systemonedev) ([systemone.dev](https://systemone.dev)).
 
 The System One category and wire format were introduced by TypeSafe AI with Jev. SystemOne Builder
