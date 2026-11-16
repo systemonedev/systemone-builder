@@ -369,16 +369,17 @@ def phishing_layouts(raw: dict[str, Any]) -> dict[str, dict[str, Any]]:
 
 
 def load_workspace_counterfactuals(workspace_dir: Path | None = None) -> list[dict[str, Any]]:
-    """Load the 160 counterfactual emails (80 pairs) from workspace/datasets/phishing_classifier/."""
+    """Load the 160 counterfactual emails (80 pairs) from workspace/datasets/phishing_classifier/ or system_one/suites/."""
     if workspace_dir is None:
-        # Resolve relative to repo root, falling back to container mounts (/host_ws or /workspace)
+        # Resolve relative to repo root, falling back to tracked system_one/suites or container mounts
         repo_root = Path(__file__).resolve().parents[3]
         candidates = [
             repo_root / "workspace" / "datasets" / "phishing_classifier",
+            Path(__file__).resolve().parent.parent / "system_one" / "suites",
             Path("/host_ws/datasets/phishing_classifier"),
             Path("/workspace/datasets/phishing_classifier"),
         ]
-        workspace_dir = next((c for c in candidates if c.exists()), candidates[0])
+        workspace_dir = next((c for c in candidates if (c / "training_data.v02.jsonl").exists()), candidates[0])
     files = [
         workspace_dir / "training_data.v02.jsonl",
         workspace_dir / "training_data_batch2.clean.jsonl",
