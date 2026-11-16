@@ -21,7 +21,7 @@ from typing import Any
 import httpx
 
 from systemone_builder.kenning.importer import load_rows
-from systemone_builder.kenning.model import BIAS_TYPES, CONFIG_FILE, read_config
+from systemone_builder.kenning.model import BIAS_TYPES, CONFIG_FILE, calibration_key, read_config
 from systemone_builder.kenning.train import fit_biases, fit_temperatures, metrics
 from systemone_builder.system_one.contract import Question
 
@@ -69,11 +69,13 @@ async def collect(url: str, rows: list[dict[str, Any]], temps: dict[str, float],
         models.add(body.get("model", ""))
         for qid, t in row["targets"].items():
             q = Question.model_validate(row["questions"][qid])
-            options, scores = scores_from(body["answers"][qid], temps.get(q.type, 1.0),
-                                          (biases or {}).get(q.type, 0.0))
+            ckey = calibration_key(q)
+            used_t = temps.get(ckey, temps.get(q.type, 1.0))
+            used_b = (biases or {}).get(ckey, (biases or {}).get(q.type, 0.0))
+            options, scores = scores_from(body["answers"][qid], used_t, used_b)
             if q.type == "score":  # levels come back keyed "0", "1", ...
                 options = [str(o) for o in options]
-            raw.append((q.type, scores, _vector(q, options, t)))
+            raw.append((ckey, scores, _vector(q, options, t)))
 
     async with httpx.AsyncClient(base_url=url.rstrip("/"), timeout=120) as client:
         await asyncio.gather(*(one(client, row) for row in rows))

@@ -5,12 +5,72 @@ from __future__ import annotations
 from systemone_builder.adapters.byom import resolve
 from systemone_builder.adapters.factory import build_adapter
 from systemone_builder.config import Settings
-from systemone_builder.system_one.engines import JevEngine, LLMJsonEngine, LocalLogprobEngine, SystemOneEngine
+from systemone_builder.system_one.engines import (
+    DirectClefEngine,
+    DirectKenningEngine,
+    DirectKenningXLEngine,
+    JevEngine,
+    LLMJsonEngine,
+    LocalLogprobEngine,
+    SystemOneEngine,
+)
 
-ENGINES = ("kenning", "clef", "jev", "glide", "local", "llm")
+ENGINES = ("kenning", "clef", "clef-direct", "xl", "jev", "glide", "local", "llm", "openai", "anthropic", "gemini", "openrouter", "ollama")
+
+
+def _build_frontier_llm(provider: str, model: str, s: Settings) -> SystemOneEngine:
+    timeout = max(s.request_timeout_s, 90.0)
+    if provider == "openai":
+        return LLMJsonEngine(
+            build_adapter("openai", s.openai_url, model, timeout, s.openai_api_key),
+            name=f"openai ({model})",
+        )
+    if provider == "anthropic":
+        return LLMJsonEngine(
+            build_adapter("anthropic", s.anthropic_url, model, timeout, s.anthropic_api_key),
+            name=f"anthropic ({model})",
+        )
+    if provider == "gemini":
+        return LLMJsonEngine(
+            build_adapter("openai", s.gemini_url, model, timeout, s.gemini_api_key),
+            name=f"gemini ({model})",
+        )
+    if provider == "openrouter":
+        return LLMJsonEngine(
+            build_adapter("openai", s.openrouter_url, model, timeout, s.openrouter_api_key),
+            name=f"openrouter ({model})",
+        )
+    if provider == "ollama":
+        return LLMJsonEngine(
+            build_adapter("ollama", s.oracle_url, model, s.oracle_timeout_s),
+            name=f"ollama ({model})",
+        )
+    raise ValueError(f"unknown LLM provider {provider!r}; choose from openai, anthropic, gemini, openrouter, ollama")
 
 
 def build_engine(kind: str, s: Settings) -> SystemOneEngine:
+    if ":" in kind:
+        prefix, target = kind.split(":", 1)
+        prefix, target = prefix.strip(), target.strip()
+        if prefix == "kenning" and target:
+            return DirectKenningEngine(target)
+        if prefix == "clef" and target:
+            return DirectClefEngine(target)
+        if prefix == "xl" and target:
+            return DirectKenningXLEngine(target)
+        if prefix == "llm" and "/" in target:
+            prov, mod = target.split("/", 1)
+            return _build_frontier_llm(prov.strip(), mod.strip(), s)
+        if prefix == "llm" and target:
+            o = resolve(s)["oracle"]
+            return LLMJsonEngine(build_adapter(o.adapter, o.url, target, s.oracle_timeout_s, o.api_key()),
+                                 name=f"llm ({target})")
+        if prefix in ("openai", "anthropic", "gemini", "openrouter", "ollama") and target:
+            return _build_frontier_llm(prefix, target, s)
+    if kind == "clef-direct":
+        return DirectClefEngine("Cloudflare/clef-flash")
+    if kind == "xl":
+        return DirectKenningXLEngine("Qwen/Qwen2.5-7B-Instruct")
     if kind == "clef":
         # Cloudflare Clef (Apache-2.0), served locally by kenning.clef_serve (compose profile "clef")
         return JevEngine(None, base_url=s.clef_url, model="clef-flash", timeout_s=max(s.request_timeout_s, 120),
@@ -34,7 +94,7 @@ def build_engine(kind: str, s: Settings) -> SystemOneEngine:
     if kind == "llm":
         o = resolve(s)["oracle"]
         return LLMJsonEngine(build_adapter(o.adapter, o.url, o.model, s.oracle_timeout_s, o.api_key()))
-    raise ValueError(f"unknown engine {kind!r}; choose from {', '.join(ENGINES)}")
+    raise ValueError(f"unknown engine {kind!r}; choose from {', '.join(ENGINES)} (or <provider>:<model>)")
 
 
 def api_engine(s: Settings) -> SystemOneEngine:

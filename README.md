@@ -134,17 +134,26 @@ That computation is what **Kenning-XL** explores: an experimental **decoder** wi
 reasoning mode, strong on records and tables (a 4B decoder reaches ~0.79 / ~0.78). It's merged into `main` as
 research, not a published model — full method and open items in [docs/kenning.md](docs/kenning.md).
 
-<details><summary>Email suites (regression checks)</summary>
+<details><summary>Email &amp; Phishing suites (domain-specialised + regression checks)</summary>
 
-| | Kenning v0.5 | Clef-flash | TypeSafe Jev (hosted) |
-|---|---|---|---|
-| Held-out modern emails: accuracy | 0.75 | 0.90 | 0.90 |
-| Held-out modern emails: phishing auto-closed as safe | **0** | 0 | 0 |
-| Phishing dataset (50) | 0.78 | 0.96 | 0.96 |
-| Out of domain: spam / emotion / news | 0.917 / 0.583 / 0.867 | 0.900 / 0.600 / 0.950 | 0.967 / 0.583 / 0.933 |
+For email gateway and SOC pre-filtering, two domain-specialised Apache-2.0 models pair a deterministic Stage-0 email header/link/SaaS pre-parser (`kenning/phishing_data.py`) with counterfactual pair training:
+- **`kenning-phishing-v1`** (DeBERTa-v3-large, 512 tokens, ~37 ms p50): highest single-question discrimination (`0.970` ROC-AUC on `modern2`, `0.766` macro across 4 state layouts)
+- **`kenning-phishing-long-v1`** (ModernBERT-large, 1,280 tokens, ~18–30 ms p50): highest 6-question triage macro (`0.888` on `phishing_counterfactual`, `0.675` counterfactual twin-flip accuracy, `0.060` ECE)
 
-When Kenning automates a decision it was right in every suite except one spam message. It is behind on
-subtle real-world phishing, so keep a person in the loop for those.
+| Suite / Metric | **kenning-phishing-v1** | **kenning-phishing-long-v1** | Kenning v0.6 (general) | Qwen2.5-7B-Instruct (XL) | Clef-flash (9B) |
+|---|---:|---:|---:|---:|---:|
+| **`phishing_counterfactual` (80 items / 40 pairs): 6-task macro** | 0.867 | **0.888** | 0.394 | 0.602 | 0.748 |
+| …`is_phish` accuracy @ 0.5 / ROC-AUC | **0.825** / 0.910 | **0.825** / **0.912** | 0.650 / 0.649 | 0.500 / 0.588 | 0.775 / 0.861 |
+| …`is_phish` counterfactual pair-flip accuracy | 0.650 | **0.675** | 0.300 | 0.000 | 0.550 |
+| …`is_phish` phishing auto-closed as safe (0.9 / 0.1 gate) | **0** | **0** | 3 | 40 | **0** |
+| …`recommended_action` (3-way routing) accuracy | 0.812 | **0.850** | 0.325 | 0.575 | 0.487 |
+| **`phishing_layouts` (128 items across 4 layouts): macro** | **0.766** | 0.750 | 0.555 | 0.500 | 0.750 |
+| **`phreshphish` (80 webpages, Stage-2 DOM/URL triage): `is_phish` / macro** | **1.000** / **1.000** | **1.000** / 0.829 | 0.900 / 0.929 | **1.000** / 0.983 | **1.000** / **1.000** |
+| **`modern2` (20 subtle body-only lures): accuracy / ROC-AUC** | 0.800 / **0.970** | 0.800 / 0.850 | 0.650 / 0.890 | 0.500 / 0.640 | **0.900** / 0.960 |
+| **`decision_index` (100 items, 5 areas): Index (0..100) / macro** | 38.1 / 0.638 | **57.2** / **0.760** | 49.2 / 0.721 | 72.8 / 0.843 | **97.9** / **0.990** |
+| Held-out modern emails (`modern`, v0.5 baseline): accuracy | — | — | 0.75 (v0.5) | — | 0.90 |
+| Out of domain: spam / emotion / news (v0.5 baseline) | — | — | 0.917 / 0.583 / 0.867 | — | 0.900 / 0.600 / 0.950 |
+
 </details>
 
 ## Train your own
@@ -158,7 +167,7 @@ should check with the user before switching them to a $499 plan, Kenning v0.5 sa
 of gap a few thousand cases — or the v0.6 deliberate reasoner — close.
 
 ```bash
-# built-in specs: computer_use, insurance_claim, chat_moderation (or write your own)
+# built-in specs: computer_use, insurance_claim, chat_moderation, phishing_triage (or write your own)
 docker compose exec api systemone problems
 # 3,000 teacher-written cases (each checked blind), your own labelled data (validated line by
 # line), and general data so the model stays good at everything else

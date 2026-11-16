@@ -33,7 +33,18 @@ from pathlib import Path
 from typing import Any
 
 from systemone_builder.system_one.contract import Question
-from systemone_builder.kenning.model import BIAS_TYPES, CONFIG_FILE, DEFAULT_BASE, TEMPLATE_VERSION, entailment_index, hypotheses, make_deterministic, pair_scores
+from systemone_builder.kenning.model import (
+    BIAS_TYPES,
+    CONFIG_FILE,
+    DEFAULT_BASE,
+    TEMPLATE_VERSION,
+    budget_premise,
+    calibration_key,
+    entailment_index,
+    hypotheses,
+    make_deterministic,
+    pair_scores,
+)
 
 
 # ------------------------------------------------------------------- data
@@ -76,19 +87,40 @@ def load_groups(path: Path) -> list[dict[str, Any]]:
     from systemone_builder.system_one.contract import render_state
 
     groups = []
-    for line_no, line in enumerate(path.read_text().splitlines()):
+    for line_no, line in enumerate(path.read_text(encoding="utf-8").splitlines()):
         if not line.strip():
             continue
         row = json.loads(line)
         premise = render_state(row["state"])
+        pair_id = row.get("pair_id") or (row["state"].get("pair_id") if isinstance(row.get("state"), dict) else None)
+        split_key = f"pair:{pair_id}" if pair_id else f"row:{line_no}"
+        weight = float(row.get("weight", 1.5 if pair_id else 1.0))
         for qid, qd in row["questions"].items():
             if qid not in row.get("targets", {}):
                 continue
             q = Question.model_validate(qd)
             texts, options = hypotheses(q)
-            groups.append({"row": line_no, "type": q.type, "premise": premise, "hyps": texts,
-                           "target": target_vector(q, options, row["targets"][qid])})
+            groups.append({
+                "row": line_no,
+                "split_key": split_key,
+                "weight": weight,
+                "type": calibration_key(q),
+                "premise": premise,
+                "hyps": texts,
+                "target": target_vector(q, options, row["targets"][qid]),
+            })
     return groups
+
+
+def budget_groups(groups: list[dict[str, Any]], tok: Any, max_length: int) -> None:
+    """Pre-compute the question-budgeted premise for each group so train and eval match serving."""
+    cache: dict[tuple[str, int], list[int]] = {}
+    for g in groups:
+        p = g["premise"]
+        key = (p, id(tok))
+        if key not in cache:
+            cache[key] = tok(p, add_special_tokens=False)["input_ids"]
+        g["budgeted_premise"] = budget_premise(tok, p, g["hyps"], max_length, prem_ids=cache[key])
 
 
 # ---------------------------------------------------------------- metrics
@@ -101,7 +133,8 @@ def evaluate(model: Any, tok: Any, groups: list[dict[str, Any]], pos: int, max_l
     model.eval()
     with torch.inference_mode():
         for g in groups:
-            enc = tok([g["premise"]] * len(g["hyps"]), g["hyps"], truncation="only_first", max_length=max_length,
+            prem = g.get("budgeted_premise") or budget_premise(tok, g["premise"], g["hyps"], max_length)
+            enc = tok([prem] * len(g["hyps"]), g["hyps"], truncation="only_first", max_length=max_length,
                       padding=True, return_tensors="pt").to(device)
             s = pair_scores(model, model(**enc).logits, pos).tolist()
             raw.append((g["type"], s, g["target"]))
@@ -128,16 +161,19 @@ def _softmax(z: list[float], t: float, bias: float = 0.0) -> list[float]:
 def metrics(raw: list[tuple[str, list[float], list[float]]], temps: dict[str, float],
             biases: dict[str, float] | None = None) -> dict[str, Any]:
     out: dict[str, Any] = {}
-    for kind in [*sorted({k for k, _, _ in raw}), "all"]:
-        rows = [r for r in raw if kind == "all" or r[0] == kind]
+    kinds_present = {k for k, _, _ in raw}
+    extra_noul = ["noul"] if (kinds_present & {"noul_bare", "noul_criteria"}) and "noul" not in kinds_present else []
+    for kind in [*sorted(kinds_present), *extra_noul, "all"]:
+        rows = [r for r in raw if kind == "all" or r[0] == kind or (kind == "noul" and r[0].startswith("noul"))]
         if not rows:
             continue
         acc = nll = brier = 0.0
         conf: list[float] = []
         hit: list[float] = []
         for k, s, y in rows:
-            b = (biases or {}).get(k, 0.0) if k in BIAS_TYPES else 0.0
-            p = _softmax(s, temps.get(k, 1.0), b)
+            t = temps.get(k, temps.get("noul", 1.0) if k.startswith("noul") else 1.0)
+            b = (biases or {}).get(k, (biases or {}).get("noul", 0.0) if k.startswith("noul") else 0.0) if k in BIAS_TYPES else 0.0
+            p = _softmax(s, t, b)
             top = max(range(len(p)), key=p.__getitem__)
             truth = max(range(len(y)), key=y.__getitem__)
             acc += float(top == truth)
@@ -163,15 +199,25 @@ def fit_biases(raw: list[tuple[str, list[float], list[float]]], temps: dict[str,
     """
     grid = [x / 20 for x in range(-80, 81)]  # -4.00 .. 4.00 in 0.05 steps
     out: dict[str, float] = {}
-    for kind in {k for k, _, _ in raw} & set(BIAS_TYPES):
+    kinds_present = {k for k, _, _ in raw} & set(BIAS_TYPES)
+    for kind in sorted(kinds_present):
         rows = [(s, y) for k, s, y in raw if k == kind]
-        t = temps.get(kind, 1.0)
+        t = temps.get(kind, temps.get("noul", 1.0) if kind.startswith("noul") else 1.0)
 
         def nll(b: float) -> float:
             return -sum(sum(yi * math.log(max(pi, 1e-12)) for yi, pi in zip(y, _softmax(s, t, b)))
                         for s, y in rows)
 
         out[kind] = round(min(grid, key=nll), 4)
+    if (kinds_present & {"noul_bare", "noul_criteria"}) and "noul" not in out:
+        rows = [(s, y) for k, s, y in raw if k.startswith("noul")]
+        t = temps.get("noul", 1.0)
+
+        def nll_all(b: float) -> float:
+            return -sum(sum(yi * math.log(max(pi, 1e-12)) for yi, pi in zip(y, _softmax(s, t, b)))
+                        for s, y in rows)
+
+        out["noul"] = round(min(grid, key=nll_all), 4)
     return out
 
 
@@ -179,13 +225,21 @@ def fit_temperatures(raw: list[tuple[str, list[float], list[float]]]) -> dict[st
     """Per question type, the temperature with the lowest held-out NLL."""
     grid = [math.exp(x / 20) for x in range(-60, 61)]  # 0.05 .. 20
     temps: dict[str, float] = {}
-    for kind in {k for k, _, _ in raw}:
+    kinds_present = {k for k, _, _ in raw}
+    for kind in sorted(kinds_present):
         rows = [(s, y) for k, s, y in raw if k == kind]
 
         def nll(t: float) -> float:
             return -sum(sum(yi * math.log(max(pi, 1e-12)) for yi, pi in zip(y, _softmax(s, t))) for s, y in rows)
 
         temps[kind] = round(min(grid, key=nll), 4)
+    if (kinds_present & {"noul_bare", "noul_criteria"}) and "noul" not in temps:
+        rows = [(s, y) for k, s, y in raw if k.startswith("noul")]
+
+        def nll_all(t: float) -> float:
+            return -sum(sum(yi * math.log(max(pi, 1e-12)) for yi, pi in zip(y, _softmax(s, t))) for s, y in rows)
+
+        temps["noul"] = round(min(grid, key=nll_all), 4)
     return temps
 
 
@@ -225,15 +279,17 @@ def main(argv: list[str] | None = None) -> int:
         torch.cuda.set_per_process_memory_fraction(a.max_vram_fraction)
 
     groups = load_groups(a.data)
-    rows = sorted({g["row"] for g in groups})
-    random.Random(a.seed).shuffle(rows)
-    val_rows = set(rows[: max(1, int(len(rows) * a.val_fraction))])
-    train = [g for g in groups if g["row"] not in val_rows]
-    val = [g for g in groups if g["row"] in val_rows]
-    print(f"[kenning-train] {len(groups)} question groups from {len(rows)} rows: {len(train)} train / {len(val)} held out",
-          flush=True)
+    split_keys = sorted({g.get("split_key", f"row:{g['row']}") for g in groups})
+    random.Random(a.seed).shuffle(split_keys)
+    val_keys = set(split_keys[: max(1, int(len(split_keys) * a.val_fraction))])
+    train = [g for g in groups if g.get("split_key", f"row:{g['row']}") not in val_keys]
+    val = [g for g in groups if g.get("split_key", f"row:{g['row']}") in val_keys]
+    rows = {g["row"] for g in groups}
+    print(f"[kenning-train] {len(groups)} question groups from {len(rows)} rows ({len(split_keys)} split groups): "
+          f"{len(train)} train / {len(val)} held out", flush=True)
 
     tok = AutoTokenizer.from_pretrained(a.base)
+    budget_groups(groups, tok, a.max_length)
     model = AutoModelForSequenceClassification.from_pretrained(a.base, dtype=torch.float32).to(device)
     pos = entailment_index(model)
 
@@ -258,7 +314,7 @@ def main(argv: list[str] | None = None) -> int:
         try:
             total = 0.0
             for micro in micro_batches(batch, a.max_pairs):
-                premises = [g["premise"] for g in micro for _ in g["hyps"]]
+                premises = [g.get("budgeted_premise", g["premise"]) for g in micro for _ in g["hyps"]]
                 hyps = [h for g in micro for h in g["hyps"]]
                 enc = tok(premises, hyps, truncation="only_first", max_length=a.max_length, padding=True,
                           return_tensors="pt").to(device)
@@ -269,8 +325,9 @@ def main(argv: list[str] | None = None) -> int:
                 i = 0
                 for g in micro:
                     n = len(g["hyps"])
+                    w = float(g.get("weight", 1.0))
                     logp = torch.log_softmax(scores[i:i + n], dim=-1)
-                    loss = loss - (torch.tensor(g["target"], device=device) * logp).sum()
+                    loss = loss - w * (torch.tensor(g["target"], device=device) * logp).sum()
                     i += n
                 # Same gradient as one big batch: every group is weighted 1/len(batch).
                 loss = loss / len(batch)

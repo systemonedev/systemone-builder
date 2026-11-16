@@ -14,8 +14,9 @@ import httpx
 
 from systemone_builder.kenning import calibrate as calibrate_mod
 from systemone_builder.kenning.calibrate import scores_from
-from systemone_builder.kenning.model import BIAS_TYPES, _clean_bias
+from systemone_builder.kenning.model import BIAS_TYPES, _clean_bias, budget_premise, calibration_key
 from systemone_builder.kenning.train import _softmax, fit_biases, fit_temperatures, metrics
+from systemone_builder.system_one.contract import Question
 
 
 def test_temperature_cannot_move_a_two_option_decision():
@@ -159,3 +160,46 @@ def test_metrics_only_biases_the_types_serving_biases():
     rogue = {"choice": 3.0}                                        # a bias serving would ignore
     assert "choice" not in BIAS_TYPES
     assert metrics(raw, temps, rogue)["choice"] == metrics(raw, temps)["choice"]
+
+
+def test_conditional_noul_biases_reconcile_criteria_vs_bare_shift():
+    """Reproduces the v0.7 calibration split: noul_criteria and noul_bare have opposite offsets."""
+    q_bare = Question(type="noul", instructions="Is this email malicious?")
+    q_crit = Question(type="noul", instructions="Is this email malicious?",
+                      criteria={"true": "Phishing or spoofing", "false": "Legitimate business mail"})
+    assert calibration_key(q_bare) == "noul_bare"
+    assert calibration_key(q_crit) == "noul_criteria"
+
+    raw = [
+        *[( "noul_bare", s, y) for _, s, y in _noul_rows(0.5, 200)],
+        *[( "noul_criteria", s, y) for _, s, y in _noul_rows(-0.5, 200)],
+    ]
+    temps = fit_temperatures(raw)
+    biases = fit_biases(raw, temps)
+    assert {"noul", "noul_bare", "noul_criteria"} <= set(biases)
+    # Single scalar noul bias cannot fix two opposite shifts at once
+    single_only = {"noul": biases["noul"]}
+    acc_single = metrics(raw, temps, single_only)["noul"]["accuracy"]
+    acc_cond = metrics(raw, temps, biases)["noul"]["accuracy"]
+    assert acc_cond > acc_single + 0.15, f"conditional bias did not reconcile split: {acc_single} -> {acc_cond}"
+
+
+def test_budget_premise_keeps_identical_state_across_options():
+    """Options of different lengths in the same group must be scored against the exact same premise."""
+    class DummyTokenizer:
+        def num_special_tokens_to_add(self, pair: bool = False) -> int:
+            return 3 if pair else 2
+
+        def __call__(self, text: str, add_special_tokens: bool = True):
+            return {"input_ids": text.split()}
+
+        def decode(self, ids: list[str], skip_special_tokens: bool = True) -> str:
+            return " ".join(ids)
+
+    tok = DummyTokenizer()
+    premise = " ".join(f"w{i}" for i in range(20))
+    hyps = ["short option", "much longer option with many descriptive tokens attached"]
+    out = budget_premise(tok, premise, hyps, max_length=15)
+    # 15 max_length - 3 specials - 8 tokens in longest hyp = 4 premise tokens
+    assert out == "w0 w1 w2 w3"
+

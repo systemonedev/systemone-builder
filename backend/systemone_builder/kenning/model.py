@@ -46,12 +46,51 @@ TEMPLATE_VERSION = 1
 # Served when nothing else is configured: the published, calibrated Kenning (Apache-2.0).
 # Only two-option questions take a decision bias: for choice and score the option order is not fixed,
 # so a scalar on "the first option" would mean a different thing from one question to the next.
-BIAS_TYPES = ("noul",)
+# noul questions with explicit criteria vs bare yes/no questions can have different natural boundaries
+# (see v0.7 in CHANGELOG.md), so calibration fits both conditional keys and a fallback "noul" key.
+BIAS_TYPES = ("noul", "noul_bare", "noul_criteria")
 # The grid fit_biases searches; a value outside it did not come from our own calibration.
 BIAS_LIMIT = 4.0
-DEFAULT_MODEL = "systemonedev/kenning-large-v0.5"
+DEFAULT_MODEL = "systemonedev/kenning-large-v0.6"
 # Starting point for training: a zero-shot NLI model with no non-commercial data (MIT).
 DEFAULT_BASE = "MoritzLaurer/deberta-v3-large-zeroshot-v2.0-c"
+
+
+def has_criteria(q: Question) -> bool:
+    """Whether a question supplies non-empty option/answer criteria."""
+    if q.criteria is None:
+        return False
+    if isinstance(q.criteria, dict):
+        return any(bool(describe(v)) for v in q.criteria.values())
+    return bool(describe(q.criteria))
+
+
+def calibration_key(q: Question) -> str:
+    """Calibration bucket for temperature and decision bias."""
+    if q.type == "noul":
+        return "noul_criteria" if has_criteria(q) else "noul_bare"
+    return q.type
+
+
+def budget_premise(tokenizer: Any, premise: str, hyps: list[str], max_length: int,
+                   prem_ids: list[int] | None = None) -> str:
+    """Truncate ``premise`` to a token budget shared by every hypothesis in a question group.
+
+    ``truncation="only_first"`` trims the premise to whatever room each hypothesis leaves, so a
+    long option description would see less of the state than a short one -- and the group's
+    softmax would then compare scores taken over different evidence. Budgeting per question
+    keeps every option on identical evidence during both training and inference.
+    """
+    if not hyps:
+        return premise
+    specials = tokenizer.num_special_tokens_to_add(pair=True)
+    if prem_ids is None:
+        prem_ids = tokenizer(premise, add_special_tokens=False)["input_ids"]
+    max_hyp = max(len(tokenizer(h, add_special_tokens=False)["input_ids"]) for h in hyps)
+    budget = max(0, max_length - specials - max_hyp)
+    if len(prem_ids) <= budget:
+        return premise
+    return tokenizer.decode(prem_ids[:budget], skip_special_tokens=True)
 
 
 def hypotheses(q: Question) -> tuple[list[str], list[Any]]:
@@ -172,7 +211,7 @@ class Kenning:
         # Decision bias, in post-temperature logit units, added to the first option ("yes"). Temperature
         # cannot move a two-option boundary -- p >= 0.5 is the same test as score_yes >= score_no -- so
         # this is the only term that can. Absent or 0.0 leaves behaviour exactly as before.
-        self.bias: dict[str, float] = {k: 0.0 for k in BIAS_TYPES} | _clean_bias(self.config.get("bias"))
+        self.bias: dict[str, float] = {"noul": 0.0} | _clean_bias(self.config.get("bias"))
         self.name = self.config.get("name") or Path(self.path).name or self.path
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         dtype = torch.bfloat16 if self.device.startswith("cuda") else torch.float32
@@ -188,21 +227,11 @@ class Kenning:
 
     def premises_for(self, premise: str, groups: list[tuple[str, Question, list[Any], int, int]],
                      hyps: list[str]) -> list[str]:
-        """One premise per hypothesis, truncated to a budget shared by every option of its question.
-
-        ``truncation="only_first"`` trims the premise to whatever room each hypothesis leaves, so a
-        long option description would see less of the state than a short one -- and the group's
-        softmax would then compare scores taken over different evidence. Budgeting per question
-        keeps every option on identical evidence and makes the answer independent of how verbosely
-        the options happen to be written.
-        """
-        specials = self.tokenizer.num_special_tokens_to_add(pair=True)
+        """One premise per hypothesis, truncated to a budget shared by every option of its question."""
         prem_ids = self.tokenizer(premise, add_special_tokens=False)["input_ids"]
         prems: list[str] = [premise] * len(hyps)
         for _qid, _q, _options, start, n in groups:
-            budget = max(0, self.max_length - specials - max(self._tok_len(h) for h in hyps[start:start + n]))
-            text = (premise if len(prem_ids) <= budget
-                    else self.tokenizer.decode(prem_ids[:budget], skip_special_tokens=True))
+            text = budget_premise(self.tokenizer, premise, hyps[start:start + n], self.max_length, prem_ids=prem_ids)
             for j in range(start, start + n):
                 prems[j] = text
         return prems
@@ -236,9 +265,10 @@ class Kenning:
             flat, tokens = self.scores(self.premises_for(premise, groups, hyps), hyps)
         answers: dict[str, Any] = {}
         for qid, q, options, start, n in groups:
-            t = self.temperature.get(q.type, 1.0)
+            ckey = calibration_key(q)
+            t = self.temperature.get(ckey, self.temperature.get(q.type, 1.0))
             z = [s / t for s in flat[start:start + n]]
-            b = self.bias.get(q.type, 0.0) if q.type in BIAS_TYPES else 0.0
+            b = self.bias.get(ckey, self.bias.get(q.type, 0.0)) if q.type == "noul" else 0.0
             if b:
                 z[0] += b
             m = max(z)

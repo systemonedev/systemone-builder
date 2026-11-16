@@ -235,10 +235,13 @@ def _clamp(x: Any) -> float:
 class LLMJsonEngine(SystemOneEngine):
     """A generative LLM writing the answers as JSON (the usual agent approach)."""
 
-    def __init__(self, adapter: ModelAdapter, max_tokens: int = 512) -> None:
+    def __init__(self, adapter: ModelAdapter, max_tokens: int = 512, name: str | None = None) -> None:
         self.adapter = adapter
         self.max_tokens = max_tokens
-        self.name = f"llm ({adapter.model})"
+        self.name = name or f"llm ({adapter.model})"
+
+    async def aclose(self) -> None:
+        await self.adapter.aclose()
 
     async def answer(self, req: SystemOneRequest) -> SystemOneResponse:
         spec = []
@@ -284,3 +287,128 @@ class LLMJsonEngine(SystemOneEngine):
             usage=Usage(input_tokens=gen.prompt_tokens or 0, output_tokens=gen.completion_tokens or 0),
             latency_ms=latency,
         )
+
+
+# -------------------------------------------------------- Direct Kenning
+class DirectKenningEngine(SystemOneEngine):
+    """In-process Kenning cross-encoder engine (no HTTP container needed)."""
+
+    def __init__(self, path: str, device: str | None = None, max_length: int | None = None) -> None:
+        from pathlib import Path as _P
+
+        from systemone_builder.kenning.model import read_config
+
+        self._path = path
+        self._device = device
+        self._max_length = max_length
+        self._kenning: Any = None
+        cfg = read_config(path) if _P(path).is_dir() else {}
+        name = cfg.get("name") or _P(path).name or path
+        self.name = f"kenning ({name})"
+
+    def _ensure_loaded(self) -> Any:
+        if self._kenning is None:
+            from systemone_builder.kenning.model import Kenning
+
+            self._kenning = Kenning(path=self._path, device=self._device, max_length=self._max_length)
+        return self._kenning
+
+    async def answer(self, req: SystemOneRequest) -> SystemOneResponse:
+        k = await asyncio.to_thread(self._ensure_loaded)
+        return await asyncio.to_thread(k.answer, req)
+
+    async def aclose(self) -> None:
+        if self._kenning is not None:
+            import gc
+
+            import torch
+
+            self._kenning = None
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+
+class DirectKenningXLEngine(SystemOneEngine):
+    """In-process decoder LM (KenningXL) single-pass logit readout engine."""
+
+    def __init__(self, path: str, device: str | None = None, deliberate: bool = False) -> None:
+        from pathlib import Path as _P
+
+        self._path = path
+        self._device = device
+        self._deliberate = deliberate
+        self._xl: Any = None
+        short = _P(path).name or path.split("/")[-1]
+        self.name = f"xl ({short}{'-deliberate' if deliberate else ''})"
+
+    def _ensure_loaded(self) -> Any:
+        if self._xl is None:
+            from systemone_builder.kenning.xl import KenningXL
+
+            self._xl = KenningXL(path=self._path, device=self._device)
+        return self._xl
+
+    async def answer(self, req: SystemOneRequest) -> SystemOneResponse:
+        xl = await asyncio.to_thread(self._ensure_loaded)
+        return await asyncio.to_thread(xl.system_one, req, self._deliberate)
+
+    async def aclose(self) -> None:
+        if self._xl is not None:
+            import gc
+
+            import torch
+
+            self._xl = None
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+
+class DirectClefEngine(SystemOneEngine):
+    """In-process Cloudflare Clef engine (no HTTP container needed)."""
+
+    def __init__(self, repo: str = "Cloudflare/clef-flash") -> None:
+        self._repo = repo
+        self._clef: Any = None
+        self.name = f"clef ({repo.split('/')[-1]})"
+
+    def _ensure_loaded(self) -> Any:
+        if self._clef is None:
+            import os
+
+            from systemone_builder.kenning import clef_serve
+
+            os.environ["CLEF_MODEL"] = self._repo
+            if not clef_serve._state.get("model"):
+                clef_serve.load()
+            self._clef = clef_serve
+        return self._clef
+
+    def _sync_answer(self, req: SystemOneRequest) -> SystemOneResponse:
+        clef = self._ensure_loaded()
+        body = {
+            "state": req.state,
+            "model": req.model or clef._state.get("repo", "clef-flash"),
+            "questions": {k: clef._clef_question(q.model_dump(exclude_none=True)) for k, q in req.questions.items()},
+        }
+        out = clef._answer(body)
+        return SystemOneResponse.model_validate(out)
+
+    async def answer(self, req: SystemOneRequest) -> SystemOneResponse:
+        return await asyncio.to_thread(self._sync_answer, req)
+
+    async def aclose(self) -> None:
+        if self._clef is not None:
+            import gc
+
+            import torch
+
+            self._clef._state.clear()
+            self._clef = None
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+
+

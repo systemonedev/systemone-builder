@@ -20,13 +20,18 @@ from __future__ import annotations
 import logging
 from importlib.metadata import entry_points
 
+from systemone_builder.adapters.anthropic import AnthropicAdapter
 from systemone_builder.adapters.base import ModelAdapter
 from systemone_builder.adapters.ollama import OllamaAdapter
 from systemone_builder.adapters.openai_compat import OpenAICompatAdapter
 
 log = logging.getLogger(__name__)
 
-ADAPTERS: dict[str, type[ModelAdapter]] = {"openai": OpenAICompatAdapter, "ollama": OllamaAdapter}
+ADAPTERS: dict[str, type[ModelAdapter]] = {
+    "openai": OpenAICompatAdapter,
+    "ollama": OllamaAdapter,
+    "anthropic": AnthropicAdapter,
+}
 _plugins_loaded = False
 
 

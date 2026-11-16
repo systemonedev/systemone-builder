@@ -84,6 +84,18 @@ def cmd_bench(a: argparse.Namespace) -> int:
             # 20 more, written before v0.3's subtle-phishing scenarios: a held-out check for them
             here = Path(__file__).parent / "system_one" / "suites"
             suite = jsonl_suite(here / "modern_email_2.jsonl", here / "modern_email_2.questions.json", "malicious")
+        elif a.suite == "phishing_counterfactual":
+            from systemone_builder.kenning.phishing_data import phishing_counterfactual_suite
+            suite = phishing_counterfactual_suite(a.seed)
+        elif a.suite == "phishing_layouts":
+            from systemone_builder.kenning.phishing_data import phishing_layouts_suite
+            suite = phishing_layouts_suite(a.seed)
+        elif a.suite == "decision_index":
+            from systemone_builder.system_one.decision_index_suite import decision_index_suite
+            suite = await decision_index_suite(a.n, a.seed, s.kenning_dir() / "bench_cache")
+        elif a.suite == "phreshphish":
+            from systemone_builder.system_one.phreshphish_suite import phreshphish_suite
+            suite = await phreshphish_suite(a.n, a.seed, s.kenning_dir() / "bench_cache")
         else:
             if not a.questions:
                 print("a JSONL suite needs --questions questions.json", file=sys.stderr)
@@ -249,6 +261,15 @@ def cmd_data(a: argparse.Namespace) -> int:
                     extra[f"structured:{kind}"] = (structured.rows(kind, a.structured, a.seed), {
                         "dataset": f"structured {kind} ({structured.FAMILY[kind]}): rule-generated, exact labels",
                         "license": "generated (kenning/structured.py)"})
+            if getattr(a, "counterfactual_phishing", False):
+                from systemone_builder.kenning.phishing_data import split_counterfactual_dataset, to_training_rows
+
+                cf_train, _ = split_counterfactual_dataset(seed=a.bench_seed)
+                cf_rows = to_training_rows(cf_train, seed=a.seed)
+                extra["phishing_counterfactual"] = (cf_rows, {
+                    "dataset": "paired counterfactual phishing & SaaS collaboration emails (strictly split by pair_id)",
+                    "license": "Apache-2.0 (systemone-builder counterfactual phishing dataset)",
+                })
             for spec in a.problem or []:
                 ref, _, n = spec.partition("=")
                 prow, meta, hold = await problem_rows(s, datasets, ref, int(n or 500), a.seed, a.holdout,
@@ -540,6 +561,8 @@ def main(argv: list[str] | None = None) -> int:
     d.add_argument("--structured", type=int, default=0, metavar="N",
                    help="add N rule-generated rows per structured generator (records, tables, agent steps, logs; "
                         "exact labels, see kenning/structured.py)")
+    d.add_argument("--counterfactual-phishing", action="store_true",
+                   help="add paired counterfactual phishing & SaaS collaboration emails across 4 layouts (Apache-2.0)")
     d.add_argument("--genre-share", type=float, default=0.3,
                    help="share of public-source rows that also ask 'what kind of text is this?' (0 = none)")
     d.add_argument("--problem", action="append", metavar="NAME[=ROWS]",

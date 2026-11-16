@@ -250,11 +250,13 @@ async def run_engine(engine: SystemOneEngine, suite: Suite, concurrency: int) ->
             t0 = time.perf_counter()
             try:
                 resp = await engine.answer(req)
+                usage = resp.usage.model_dump() if resp.usage else {"input_tokens": 0, "output_tokens": 0}
                 return {"id": item.id, "answers": {k: a.model_dump() for k, a in resp.answers.items()},
-                        "model": resp.model, "latency_ms": resp.latency_ms or (time.perf_counter() - t0) * 1000, "error": None}
+                        "model": resp.model, "usage": usage,
+                        "latency_ms": resp.latency_ms or (time.perf_counter() - t0) * 1000, "error": None}
             except (EngineError, AdapterError, httpx.HTTPError, ValueError) as exc:
-                return {"id": item.id, "answers": None, "latency_ms": (time.perf_counter() - t0) * 1000,
-                        "error": str(exc)}
+                return {"id": item.id, "answers": None, "usage": None,
+                        "latency_ms": (time.perf_counter() - t0) * 1000, "error": str(exc)}
 
     t0 = time.perf_counter()
     results = await asyncio.gather(*(one(it) for it in suite.items))
@@ -295,23 +297,131 @@ def _truth_bit(v: Any) -> int | None:
     return None
 
 
+def roc_auc(ps: list[float], ys: list[int]) -> float | None:
+    """Exact Wilcoxon-Mann-Whitney ROC-AUC with tie handling."""
+    pos = [p for p, y in zip(ps, ys) if y == 1]
+    neg = [p for p, y in zip(ps, ys) if y == 0]
+    if not pos or not neg:
+        return None
+    wins = 0.0
+    for p_pos in pos:
+        for p_neg in neg:
+            if p_pos > p_neg:
+                wins += 1.0
+            elif p_pos == p_neg:
+                wins += 0.5
+    return wins / (len(pos) * len(neg))
+
+
+def pr_auc(ps: list[float], ys: list[int]) -> float | None:
+    """Average precision (area under Precision-Recall curve)."""
+    total_pos = sum(ys)
+    if total_pos == 0 or total_pos == len(ys):
+        return None
+    ranked = sorted(zip(ps, ys), key=lambda x: x[0], reverse=True)
+    tp = 0
+    ap = 0.0
+    for i, (_p, y) in enumerate(ranked, start=1):
+        if y == 1:
+            tp += 1
+            ap += tp / i
+    return ap / total_pos
+
+
+def recall_at_fpr(ps: list[float], ys: list[int], max_fpr: float = 0.01) -> float | None:
+    """Highest recall achievable while keeping False Positive Rate <= max_fpr."""
+    total_pos = sum(ys)
+    total_neg = len(ys) - total_pos
+    if total_pos == 0 or total_neg == 0:
+        return None
+    thresholds = sorted(set(ps), reverse=True)
+    best_recall = 0.0
+    for tau in thresholds:
+        tp = sum(1 for p, y in zip(ps, ys) if p >= tau and y == 1)
+        fp = sum(1 for p, y in zip(ps, ys) if p >= tau and y == 0)
+        if fp / total_neg <= max_fpr:
+            best_recall = max(best_recall, tp / total_pos)
+    return best_recall
+
+
+def _pair_key(item: Item) -> str | None:
+    if isinstance(item.state, dict) and item.state.get("pair_id"):
+        return str(item.state["pair_id"])
+    if len(item.id) >= 4 and item.id[-1] in ("a", "b") and item.id[-2].isdigit():
+        return item.id[:-1]
+    return None
+
+
+def pairwise_flip_accuracy(suite: Suite, item_preds: dict[str, tuple[float, int]]) -> float | None:
+    """Fraction of counterfactual twin pairs where the model gets BOTH twins right at 0.5."""
+    by_pair: dict[str, list[tuple[float, int]]] = {}
+    for it in suite.items:
+        pk = _pair_key(it)
+        if pk and it.id in item_preds:
+            by_pair.setdefault(pk, []).append(item_preds[it.id])
+    twins = [v for v in by_pair.values() if len(v) >= 2]
+    if not twins:
+        return None
+    both_ok = sum(1 for pair in twins if all((p >= 0.5) == bool(y) for p, y in pair))
+    return both_ok / len(twins)
+
+
+# Approximate API pricing (USD per 1M input / 1M output tokens) for frontier cost comparison
+MODEL_PRICING_PER_1M: list[tuple[str, float, float]] = [
+    ("gpt-4o-mini", 0.15, 0.60),
+    ("gpt-4o", 2.50, 10.00),
+    ("o3-mini", 1.10, 4.40),
+    ("gpt-5", 2.50, 10.00),
+    ("claude-haiku", 0.80, 4.00),
+    ("claude-sonnet", 3.00, 15.00),
+    ("claude-3-7-sonnet", 3.00, 15.00),
+    ("gemini-2.5-flash", 0.15, 0.60),
+    ("gemini-2.5-pro", 1.25, 10.00),
+    ("jev", 0.20, 0.0),
+    ("glide", 0.15, 0.0),
+]
+
+
+def estimate_cost_per_100k_usd(engine_name: str, model_name: str | None,
+                               mean_in_tokens: float, mean_out_tokens: float) -> float:
+    tag = f"{engine_name} {model_name or ''}".lower()
+    for substr, in_rate, out_rate in MODEL_PRICING_PER_1M:
+        if substr in tag:
+            return round((mean_in_tokens * in_rate + mean_out_tokens * out_rate) / 10.0, 2)
+    # Self-hosted Kenning / Clef on single 24GB GPU (~$0.50/hr at ~28 items/s -> ~$0.50 per 100k emails)
+    if "kenning" in tag or "clef" in tag:
+        return 0.50
+    return 0.0
+
+
 def question_metrics(qid: str, q: Question, suite: Suite, results: list[dict[str, Any]], hi: float, lo: float) -> dict[str, Any]:
     labels = {it.id: it.labels.get(qid) for it in suite.items}
-    rows = [(r["answers"][qid], labels[r["id"]]) for r in results
+    asked = sum(1 for it in suite.items if it.labels.get(qid) is not None)
+    rows = [(r["id"], r["answers"][qid], labels[r["id"]]) for r in results
             if r["answers"] and qid in r["answers"] and labels.get(r["id"]) is not None]
-    out: dict[str, Any] = {"type": q.type, "n": len(rows)}
+    k_opts = 2 if q.type == "noul" else (len(q.criteria) if isinstance(q.criteria, (dict, list)) and len(q.criteria) >= 2 else 2)
+    out: dict[str, Any] = {"type": q.type, "n": len(rows), "k_options": k_opts}
     if not rows:
         return out
     if q.type == "noul":
-        ps = [NoulAnswer.model_validate(a).noul for a, _ in rows]
-        ys = [_truth_bit(y) for _, y in rows]
-        pairs = [(p, y) for p, y in zip(ps, ys) if y is not None]
-        ps, ys = [p for p, _ in pairs], [y for _, y in pairs]
-        out.update(accuracy=statistics.fmean(int((p >= 0.5) == bool(y)) for p, y in pairs),
-                   brier=statistics.fmean((p - y) ** 2 for p, y in pairs),
-                   ece=ece(ps, [float(y) for y in ys]))
+        triples = [(rid, NoulAnswer.model_validate(a).noul, _truth_bit(y)) for rid, a, y in rows]
+        valid = [(rid, p, y) for rid, p, y in triples if y is not None]
+        ps, ys = [p for _, p, _ in valid], [y for _, _, y in valid]
+        pairs = list(zip(ps, ys))
+        item_preds = {rid: (p, y) for rid, p, y in valid}
+        acc = statistics.fmean(int((p >= 0.5) == bool(y)) for p, y in pairs)
+        out.update(
+            accuracy=acc,
+            chance_corrected_score=round(((acc - 0.5) / 0.5) * 100.0 * (len(pairs) / max(asked, len(pairs), 1)), 2),
+            roc_auc=roc_auc(ps, ys),
+            pr_auc=pr_auc(ps, ys),
+            recall_at_1pct_fpr=recall_at_fpr(ps, ys, 0.01),
+            recall_at_5pct_fpr=recall_at_fpr(ps, ys, 0.05),
+            pairwise_flip_accuracy=pairwise_flip_accuracy(suite, item_preds),
+            brier=statistics.fmean((p - y) ** 2 for p, y in pairs),
+            ece=ece(ps, [float(y) for y in ys]),
+        )
         if qid == suite.gate:
-            asked = sum(1 for it in suite.items if it.labels.get(qid) is not None)
             auto_pos = [y for p, y in pairs if p >= hi]
             auto_neg = [y for p, y in pairs if p <= lo]
             fp, fn = auto_pos.count(0), auto_neg.count(1)
@@ -325,22 +435,25 @@ def question_metrics(qid: str, q: Question, suite: Suite, results: list[dict[str
                 "automated_accuracy": (automated - fp - fn) / automated if automated else None,
             }
     elif q.type == "choice":
-        answers = [ChoiceAnswer.model_validate(a) for a, _ in rows]
-        correct = [float(a.choice == y) for a, (_, y) in zip(answers, rows)]
+        answers = [ChoiceAnswer.model_validate(a) for _, a, _ in rows]
+        correct = [float(a.choice == y) for a, (_, _, y) in zip(answers, rows)]
         top = [max(a.probabilities.values()) for a in answers]
-        out.update(accuracy=statistics.fmean(correct), mean_top_probability=statistics.fmean(top), ece=ece(top, correct))
+        acc = statistics.fmean(correct)
+        chance = 1.0 / k_opts
+        cc = ((acc - chance) / (1.0 - chance)) * 100.0 * (len(rows) / max(asked, len(rows), 1))
+        out.update(accuracy=acc, chance_corrected_score=round(cc, 2), mean_top_probability=statistics.fmean(top), ece=ece(top, correct))
     else:
-        answers = [ScoreAnswer.model_validate(a) for a, _ in rows]
+        answers = [ScoreAnswer.model_validate(a) for _, a, _ in rows]
 
         def picked(a: ScoreAnswer) -> int | None:
-            # The level the model actually picks, as choice does. ``score`` is an expected value, so
-            # round()ing it scores a hedged-but-right distribution as wrong and penalises only
-            # engines that answer with a distribution rather than a hard level.
             return int(max(a.probabilities, key=lambda k: a.probabilities[k])) if a.probabilities else None
 
-        out.update(accuracy=statistics.fmean(float(picked(a) == int(y)) for a, (_, y) in zip(answers, rows)),
-                   mae=statistics.fmean(abs(a.score - float(y)) for a, (_, y) in zip(answers, rows)),
-                   exact_level=statistics.fmean(float(round(a.score) == int(y)) for a, (_, y) in zip(answers, rows)))
+        acc = statistics.fmean(float(picked(a) == int(y)) for a, (_, _, y) in zip(answers, rows))
+        chance = 1.0 / k_opts
+        cc = ((acc - chance) / (1.0 - chance)) * 100.0 * (len(rows) / max(asked, len(rows), 1))
+        out.update(accuracy=acc, chance_corrected_score=round(cc, 2),
+                   mae=statistics.fmean(abs(a.score - float(y)) for a, (_, _, y) in zip(answers, rows)),
+                   exact_level=statistics.fmean(float(round(a.score) == int(y)) for a, (_, _, y) in zip(answers, rows)))
     return out
 
 
@@ -354,16 +467,36 @@ def engine_report(name: str, suite: Suite, results: list[dict[str, Any]], wall_s
 
     errors = [r["error"] for r in results if r["error"]]
     models = sorted({r["model"] for r in ok if r.get("model")})
-    return {
+    model_str = models[0] if len(models) == 1 else ", ".join(models) or None
+    in_toks = [int((r.get("usage") or {}).get("input_tokens") or 0) for r in ok]
+    out_toks = [int((r.get("usage") or {}).get("output_tokens") or 0) for r in ok]
+    mean_in = statistics.fmean(in_toks) if in_toks else 0.0
+    mean_out = statistics.fmean(out_toks) if out_toks else 0.0
+    q_metrics = {qid: question_metrics(qid, q, suite, results, hi, lo) for qid, q in suite.questions.items()}
+    cc_vals = [qm["chance_corrected_score"] for qm in q_metrics.values() if qm.get("chance_corrected_score") is not None]
+    rep: dict[str, Any] = {
         "engine": name,
-        # what the engine served (e.g. kenning-large-v0.4), so runs can be compared later
-        "model": models[0] if len(models) == 1 else ", ".join(models) or None,
+        "model": model_str,
         "items": len(results), "errors": len(errors), "error_examples": sorted(set(errors))[:3],
         "latency_ms": {"p50": pct(0.5), "p95": pct(0.95), "mean": statistics.fmean(lat) if lat else None},
+        "usage": {
+            "mean_input_tokens": round(mean_in, 1),
+            "mean_output_tokens": round(mean_out, 1),
+            "est_cost_per_100k_usd": estimate_cost_per_100k_usd(name, model_str, mean_in, mean_out),
+        },
         "wall_s": wall_s, "throughput_per_s": len(results) / wall_s if wall_s else None,
         "determinism": det,
-        "questions": {qid: question_metrics(qid, q, suite, results, hi, lo) for qid, q in suite.questions.items()},
+        "chance_corrected_macro": round(statistics.fmean(cc_vals), 2) if cc_vals else None,
+        "questions": q_metrics,
     }
+    if suite.name == "decision_index":
+        from systemone_builder.system_one.decision_index_suite import decision_index_breakdown
+
+        di = decision_index_breakdown(rep, suite)
+        rep["decision_index_score"] = di["index_score"]
+        rep["family_accuracy"] = {k: v / 100.0 for k, v in (di.get("area_scores") or {}).items()}
+        rep["area_scores_100"] = di.get("area_scores") or {}
+    return rep
 
 
 # ------------------------------------------------------------------- output
@@ -384,17 +517,29 @@ def format_reports(suite: Suite, reports: list[dict[str, Any]]) -> str:
     row("errors / items", [f"{r['errors']} / {r['items']}" for r in reports])
     row("latency p50 / p95 (ms)", [f"{_f(r['latency_ms']['p50'], '{:.0f}')} / {_f(r['latency_ms']['p95'], '{:.0f}')}" for r in reports])
     row("throughput (items/s)", [_f(r["throughput_per_s"], "{:.2f}") for r in reports])
+    row("est. cost / 100k items ($)", [f"${_f((r.get('usage') or {}).get('est_cost_per_100k_usd'), '{:.2f}')}" for r in reports])
     row("identical on repeat", [f"{r['determinism']['identical']}/{r['determinism']['checked']}" for r in reports])
+    if any("decision_index_score" in r for r in reports):
+        row("DECISION INDEX (0..100)", [_f(r.get("decision_index_score"), "{:.1f}") for r in reports])
+        for area in sorted({a for r in reports for a in (r.get("area_scores_100") or {})}):
+            row(f"  area: {area}", [_f((r.get("area_scores_100") or {}).get(area), "{:.1f}") for r in reports])
+    if any("chance_corrected_macro" in r for r in reports):
+        row("chance-corrected macro (0..100)", [_f(r.get("chance_corrected_macro"), "{:.1f}") for r in reports])
     if any("macro_accuracy" in r for r in reports):
         row("MACRO ACCURACY (tasks)", [_f(r.get("macro_accuracy")) for r in reports])
         for fam in sorted({f for r in reports for f in (r.get("family_accuracy") or {})}):
             row(f"  family: {fam}", [_f((r.get("family_accuracy") or {}).get(fam)) for r in reports])
-    per_question = suite.questions.items() if len(suite.questions) <= 60 else []  # skip for many-question suites (e.g. workflowevals)
+    per_question = suite.questions.items() if len(suite.questions) <= 60 else []
     for qid, q in per_question:
         m = [r["questions"][qid] for r in reports]
         lines.append(f"[{qid}] ({q.type})")
         if q.type == "noul":
             row("  accuracy @0.5", [_f(x.get("accuracy")) for x in m])
+            if any(x.get("pairwise_flip_accuracy") is not None for x in m):
+                row("  counterfactual pair flip", [_f(x.get("pairwise_flip_accuracy")) for x in m])
+            if any(x.get("roc_auc") is not None for x in m):
+                row("  ROC-AUC", [_f(x.get("roc_auc")) for x in m])
+                row("  Recall @ 1% FPR", [_f(x.get("recall_at_1pct_fpr")) for x in m])
             row("  Brier (lower better)", [_f(x.get("brier")) for x in m])
             row("  ECE (lower better)", [_f(x.get("ece")) for x in m])
             if qid == suite.gate:
@@ -435,8 +580,11 @@ async def run_benchmark(suite: Suite, engines: list[SystemOneEngine], *, concurr
                         lo: float = 0.1, repeat_check: int = 10) -> BenchResult:
     out = BenchResult(suite)
     for engine in engines:  # one engine at a time: no contention between them
-        results, wall = await run_engine(engine, suite, concurrency)
-        det = await determinism(engine, suite, results, repeat_check) if repeat_check else {"checked": 0, "identical": 0}
+        try:
+            results, wall = await run_engine(engine, suite, concurrency)
+            det = await determinism(engine, suite, results, repeat_check) if repeat_check else {"checked": 0, "identical": 0}
+        finally:
+            await engine.aclose()
         report = engine_report(engine.name, suite, results, wall, hi, lo, det)
         if len(suite.questions) > 3:  # multi-task suites: one headline number
             from systemone_builder.system_one.multitask_suite import macro_average

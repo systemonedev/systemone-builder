@@ -111,10 +111,17 @@ class KenningXL:
         self.tokenizer = AutoTokenizer.from_pretrained(self.path)
         kw: dict[str, Any] = {"dtype": torch.bfloat16 if self.device.startswith("cuda") else torch.float32}
         if load_4bit and self.device.startswith("cuda"):
-            from transformers import BitsAndBytesConfig
-            kw["quantization_config"] = BitsAndBytesConfig(
-                load_in_4bit=True, bnb_4bit_quant_type="nf4", bnb_4bit_compute_dtype=torch.bfloat16)
-            kw["device_map"] = {"": 0}
+            try:
+                import importlib.util
+                if importlib.util.find_spec("bitsandbytes") is not None:
+                    from transformers import BitsAndBytesConfig
+                    kw["quantization_config"] = BitsAndBytesConfig(
+                        load_in_4bit=True, bnb_4bit_quant_type="nf4", bnb_4bit_compute_dtype=torch.bfloat16)
+                    kw["device_map"] = {"": 0}
+                else:
+                    load_4bit = False
+            except Exception:
+                load_4bit = False
         self.model = AutoModelForCausalLM.from_pretrained(self.path, **kw)
         if not load_4bit:
             self.model.to(self.device)

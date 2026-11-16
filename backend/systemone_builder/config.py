@@ -128,6 +128,15 @@ class Settings(BaseSettings):
     fastino_url: str = "https://api.fastino.ai"
     fastino_model: str = "fastino/GLiDE"
     fastino_api_key: str | None = Field(default=None, validation_alias=AliasChoices("FASTINO_API_KEY", "S1_FASTINO_API_KEY"))
+    # Frontier LLM providers for side-by-side System 2 benchmarking (evaluation only).
+    openai_url: str = "https://api.openai.com/v1"
+    openai_api_key: str | None = Field(default=None, validation_alias=AliasChoices("OPENAI_API_KEY", "S1_OPENAI_API_KEY"))
+    anthropic_url: str = "https://api.anthropic.com"
+    anthropic_api_key: str | None = Field(default=None, validation_alias=AliasChoices("ANTHROPIC_API_KEY", "S1_ANTHROPIC_API_KEY"))
+    gemini_url: str = "https://generativelanguage.googleapis.com/v1beta/openai"
+    gemini_api_key: str | None = Field(default=None, validation_alias=AliasChoices("GEMINI_API_KEY", "GOOGLE_API_KEY", "S1_GEMINI_API_KEY"))
+    openrouter_url: str = "https://openrouter.ai/api/v1"
+    openrouter_api_key: str | None = Field(default=None, validation_alias=AliasChoices("OPENROUTER_API_KEY", "S1_OPENROUTER_API_KEY"))
 
     # -------------------------------------------------------------- routing
     default_threshold: float = 0.80

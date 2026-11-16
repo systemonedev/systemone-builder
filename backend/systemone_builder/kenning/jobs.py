@@ -41,8 +41,9 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 KINDS = ("data", "label", "train", "bench", "recipe")
-SUITES = ("general", "multi", "modern2", "modern", "phishing", "layouts", "ood")
-ENGINES = ("kenning", "clef", "jev", "local")
+SUITES = ("general", "workflowevals", "decision_index", "multi", "phishing_counterfactual", "phishing_layouts", "phreshphish", "modern2", "modern", "phishing", "layouts", "ood")
+ENGINES = ("kenning", "clef", "clef-direct", "xl", "jev", "glide", "local", "llm")
+ENGINE_SPEC = re.compile(r"^(kenning|clef|xl|openai|anthropic|gemini|openrouter|ollama|llm):[\w./:-]{1,128}$")
 DATA_SOURCES = ("amazon", "dbpedia", "clinc", "boolq", "nli", "civil", "helpsteer", "jailbreak", "injection", "ropes")
 SLUG = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 HF_ID = re.compile(r"^[A-Za-z0-9][\w.-]{0,95}/[\w.-]{1,96}$")
@@ -243,8 +244,8 @@ def validate(kind: str, p: dict[str, Any], home: Path, *, pipeline: bool, has_je
     for s in suites:
         if s not in SUITES:
             holdout_paths(home, s)  # raises unless it's a hold-out of an existing dataset
-    if not isinstance(engines, list) or not engines or any(e not in ENGINES for e in engines):
-        raise JobError(f"engines must be a subset of {', '.join(ENGINES)}")
+    if not isinstance(engines, list) or not engines or any(not isinstance(e, str) or (e not in ENGINES and not ENGINE_SPEC.match(e)) for e in engines):
+        raise JobError(f"engines must be a subset of {', '.join(ENGINES)} (or <provider>:<model>)")
     if "jev" in engines:
         if not has_jev_key:
             raise JobError("Jev needs TYPESAFE_API_KEY in .env")
@@ -283,8 +284,8 @@ def _validate_recipe(p: dict[str, Any], home: Path, *, pipeline: bool, has_jev_k
     if not isinstance(suites, list) or any(x not in SUITES for x in suites):
         raise JobError(f"recipe bench suites must be a subset of {', '.join(SUITES)}")
     engines = bn.get("engines") or ["kenning", "clef"]
-    if not isinstance(engines, list) or not engines or any(e not in ENGINES for e in engines):
-        raise JobError(f"engines must be a subset of {', '.join(ENGINES)}")
+    if not isinstance(engines, list) or not engines or any(not isinstance(e, str) or (e not in ENGINES and not ENGINE_SPEC.match(e)) for e in engines):
+        raise JobError(f"engines must be a subset of {', '.join(ENGINES)} (or <provider>:<model>)")
     if "jev" in engines:
         if not has_jev_key:
             raise JobError("Jev needs TYPESAFE_API_KEY in .env")

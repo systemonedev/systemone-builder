@@ -1,0 +1,105 @@
+{
+  "name": "phishing_triage",
+  "title": "Email phishing & social-engineering triage",
+  "description": "Inspect structured email headers, authentication results (SPF/DKIM/DMARC), links, attachments, collaboration metadata, and body text to decide whether the email is phishing and what it asks the recipient to do.",
+  "writes": "a realistic inbound corporate email with headers, authentication results, links, attachments, and body text",
+  "state": {
+    "fields": {
+      "headers": "From display name, From address, Reply-To address, To/CC recipients, and Subject line",
+      "auth": "SPF, DKIM, and DMARC verification results (pass, fail, softfail, none)",
+      "signals": "Pre-parsed structural checks (domain mismatches, lookalike domains, sharer org alignment, recipient org spread)",
+      "links_and_attachments": "Extracted URLs with anchor text and registrable domains, plus attachment filenames and MIME types",
+      "body": "The plain-text body of the email, including any quoted reply history or collaboration notification text"
+    }
+  },
+  "questions": [
+    {
+      "id": "is_phish",
+      "ask": [
+        "Is this email a phishing attempt, social-engineering attack, or malicious lure?",
+        "Does this email exhibit phishing, spoofing, business email compromise, or deceptive credential/payment harvesting?"
+      ],
+      "labels": {
+        "yes": "Phishing, brand or executive impersonation, lookalike or mismatched link/reply-to domains, failed authentication on a claimed domain, suspicious external SaaS sharing lure, or unsolicited credential/payment/malware harvesting",
+        "no": "Legitimate transactional, operational, SaaS notification, vendor, or internal message where sender domain, authentication, links, sharer context, and requested action are consistent and benign"
+      }
+    },
+    {
+      "id": "action",
+      "ask": [
+        "What primary physical or UI action does the email ask the recipient to take?",
+        "Which interaction is the recipient prompted to perform?"
+      ],
+      "labels": {
+        "click_link": "Follow a URL or button in the email body",
+        "open_attachment": "Open, download, or extract an attached file",
+        "reply_with_info": "Reply by email or message with requested information, approvals, or payment actions",
+        "none": "Informational only; no link click, attachment open, or reply is requested"
+      }
+    },
+    {
+      "id": "ask",
+      "ask": [
+        "What sensitive asset, access, or commitment is the email ultimately asking for?",
+        "What is the underlying ask or target of the message?"
+      ],
+      "labels": {
+        "credentials": "Sign in, verify an account, reset a password, enter an MFA/OTP code, or grant OAuth permissions",
+        "payment_details": "Pay an invoice, wire funds, update bank/IBAN/ACH routing details, or purchase gift cards",
+        "document_access": "Open, view, comment on, or sign a shared cloud document, spreadsheet, or e-signature envelope",
+        "personal_info": "Provide PII, tax IDs, SSN/NI numbers, payroll records, HR beneficiary details, or confidential business data",
+        "software_install": "Run an executable/script, open a macro/archive/HTML smuggling attachment, or install a tool/extension",
+        "nothing": "No sensitive asset, login, payment, document access, or installation is requested"
+      }
+    },
+    {
+      "id": "identity_claim",
+      "ask": [
+        "Does the sender claim to represent a trusted brand, executive, internal team, or known vendor?",
+        "Is the message relying on an explicit organizational, platform, or authority identity claim?"
+      ],
+      "labels": {
+        "yes": "Claims to come from an IT/security desk, SaaS platform, executive, HR/finance team, bank, courier, or established vendor",
+        "no": "Makes no special authority or institutional identity claim"
+      }
+    },
+    {
+      "id": "urgency",
+      "ask": [
+        "Does the email apply time pressure, urgency, or threat of negative consequences?",
+        "Is there urgent deadline pressure or coercive language pushing immediate action?"
+      ],
+      "labels": {
+        "yes": "Demands immediate or same-day action, warns of account lock/suspension, overdue penalties, legal/regulatory deadlines, or urgent executive need",
+        "no": "Uses a calm, routine timeline without artificial urgency or threats"
+      }
+    },
+    {
+      "id": "recommended_action",
+      "ask": [
+        "How should the email security pipeline route this message?",
+        "What is the appropriate Stage-1 triage disposition for this email?"
+      ],
+      "labels": {
+        "deliver": "Deliver normally to the recipient's inbox (consistent sender/auth/links and benign context)",
+        "enrich_links_or_attachments": "Hold briefly for automated URL detonation or attachment sandboxing before delivery",
+        "hold_for_review": "Escalate to System-2 analyst review or out-of-band sender verification (e.g. BEC/payment/PII request)",
+        "quarantine": "Block or quarantine immediately due to clear spoofing, malicious lure, or credential/malware harvesting"
+      }
+    }
+  ],
+  "constraints": [
+    {
+      "if": {"is_phish": "no"},
+      "then": {"recommended_action": ["deliver", "enrich_links_or_attachments"]}
+    },
+    {
+      "if": {"is_phish": "yes"},
+      "then": {"recommended_action": ["quarantine", "hold_for_review", "enrich_links_or_attachments"]}
+    },
+    {
+      "if": {"action": "none"},
+      "then": {"ask": "nothing"}
+    }
+  ]
+}

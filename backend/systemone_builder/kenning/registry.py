@@ -30,6 +30,7 @@ BASE_LICENSES = {
         "Apache-2.0; its zero-shot fine-tuning mix includes non-commercially licensed data (no '-c' variant exists)",
     "MoritzLaurer/deberta-v3-large-zeroshot-v2.0-c":
         "MIT; fine-tuned on MNLI, FEVER-NLI (CC-BY-SA-3.0) and Mixtral-generated synthetic data (no non-commercial data)",
+    "tasksource/ModernBERT-large-nli": "Apache-2.0; ModernBERT-large fine-tuned on NLI datasets",
     "answerdotai/ModernBERT-large": "Apache-2.0; pretrained on web text, code and scientific articles",
     "microsoft/deberta-v3-large": "MIT",
 }
@@ -161,8 +162,20 @@ def _pct(x: Any) -> str:
     return "–" if x is None else f"{x:.3f}"
 
 
-SUITE_NAMES = {"modern_email_2": "Modern emails 2 (held out)", "modern_email": "Modern emails",
-               "phishing": "Phishing dataset", "layouts": "Layouts (4 state shapes)", "ood": "Out of domain"}
+SUITE_NAMES = {
+    "general": "General (7 families, 30 tasks)",
+    "workflowevals": "WorkflowEvals (4 workflows)",
+    "decision_index": "Jev Decision Index (5 areas, 0..100)",
+    "phishing_counterfactual": "Phishing Counterfactuals (paired twins)",
+    "phreshphish": "PhreshPhish Webpage & URL Triage",
+    "modern_email_2": "Modern emails 2 (held out)",
+    "modern_email": "Modern emails",
+    "phishing": "Phishing dataset",
+    "phishing_layouts": "Phishing Layouts (4 state shapes)",
+    "layouts": "Layouts (4 state shapes)",
+    "multi": "Multitask (14 tasks)",
+    "ood": "Out of domain",
+}
 
 
 def recorded_benchmarks(results_dir: Path | None, name: str) -> dict[str, dict[str, Any]]:
@@ -178,7 +191,8 @@ def recorded_benchmarks(results_dir: Path | None, name: str) -> dict[str, dict[s
         suite = (d.get("suite") or {}).get("name")
         ts = d.get("ts") or f.stat().st_mtime
         for r in d.get("reports") or []:
-            if r.get("engine") == "kenning" and r.get("model") == name and suite and ts > out.get(suite, (0.0, {}))[0]:
+            eng = str(r.get("engine") or "")
+            if (eng == "kenning" or eng.startswith("kenning")) and r.get("model") == name and suite and ts > out.get(suite, (0.0, {}))[0]:
                 out[suite] = (ts, r)
     return {k: v for k, (_, v) in out.items()}
 
@@ -196,7 +210,10 @@ def _bench_lines(bench: dict[str, dict[str, Any]]) -> list[str]:
         if not r:
             continue
         qs = [q for q in (r.get("questions") or {}).values() if q.get("n")]
-        acc = " / ".join(f"{q['accuracy']:.3f}" for q in qs if q.get("accuracy") is not None)
+        if r.get("macro_accuracy") is not None and len(qs) > 6:
+            acc = f"{r['macro_accuracy']:.3f} (macro)"
+        else:
+            acc = " / ".join(f"{q['accuracy']:.3f}" for q in qs if q.get("accuracy") is not None)
         gate = next((q["gate"] for q in qs if q.get("gate")), None)
         brier = next((q["brier"] for q in qs if q.get("brier") is not None), None)
         ece = next((q["ece"] for q in qs if q.get("ece") is not None), None)
