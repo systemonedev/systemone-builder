@@ -41,9 +41,9 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 KINDS = ("data", "label", "train", "bench", "recipe")
-SUITES = ("general", "workflowevals", "decision_index", "multi", "phishing_counterfactual", "phishing_layouts", "phreshphish", "modern2", "modern", "phishing", "layouts", "ood")
-ENGINES = ("kenning", "clef", "clef-direct", "xl", "jev", "glide", "local", "llm")
-ENGINE_SPEC = re.compile(r"^(kenning|clef|xl|openai|anthropic|gemini|openrouter|ollama|llm):[\w./:-]{1,128}$")
+SUITES = ("general", "workflowevals", "decision_index", "decision_probe", "multi", "phishing_counterfactual", "phishing_counterfactual_synthetic", "phishing_layouts", "phreshphish", "phreshphish_synthetic_smoke", "modern2", "modern", "phishing", "layouts", "ood")
+ENGINES = ("kenning", "clef", "clef-direct", "xl", "cascade", "jev", "glide", "local", "llm")
+ENGINE_SPEC = re.compile(r"^(kenning|clef|xl|cascade|openai|anthropic|gemini|openrouter|ollama|llm):[\w./:-]{1,128}$")
 DATA_SOURCES = ("amazon", "dbpedia", "clinc", "boolq", "nli", "civil", "helpsteer", "jailbreak", "injection", "ropes")
 SLUG = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 HF_ID = re.compile(r"^[A-Za-z0-9][\w.-]{0,95}/[\w.-]{1,96}$")

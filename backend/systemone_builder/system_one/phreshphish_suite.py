@@ -325,76 +325,56 @@ def _builtin_phreshphish_samples(seed: int = 42) -> list[dict[str, Any]]:
 
 
 async def fetch_phreshphish(n: int = 80, seed: int = 42) -> list[dict[str, Any]]:
-    """Fetch balanced `phish` and `benign` rows from `phreshphish/phreshphish` (or fall back to curated paired samples if offline)."""
+    """Fetch balanced `phish` and `benign` rows from `phreshphish/phreshphish` (fails loudly if unreachable)."""
     want = {"phish": n // 2, "benign": n - n // 2}
     got: dict[str, list[dict[str, Any]]] = {"phish": [], "benign": []}
     rng = random.Random(seed)
-    try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            meta = await hf_get(client, "/rows", {"dataset": PHRESHPHISH_DATASET, "config": "default", "split": "test", "offset": 0, "length": 1}, tries=2)
-            total = int(meta.get("num_rows_total") or 0)
-            if total > 0:
-                pages = list(range(0, max(total - 10, 1), 50))
-                rng.shuffle(pages)
-                for offset in pages[:16]:
-                    if all(len(got[k]) >= want[k] for k in want):
-                        break
-                    data = await hf_get(
-                        client,
-                        "/rows",
-                        {"dataset": PHRESHPHISH_DATASET, "config": "default", "split": "test", "offset": offset, "length": 8},
-                        tries=2,
-                    )
-                    rows = [x["row"] for x in data.get("rows", [])]
-                    rng.shuffle(rows)
-                    for row in rows:
-                        lbl = str(row.get("label") or "").strip().lower()
-                        url = str(row.get("url") or "").strip()
-                        html = str(row.get("html") or "").strip()
-                        if lbl in got and len(got[lbl]) < want[lbl] and url and html:
-                            got[lbl].append({
-                                "sha256": str(row.get("sha256") or hashlib.sha256(url.encode()).hexdigest()),
-                                "url": url,
-                                "state": extract_webpage_signals(url, html, row.get("target"), row.get("lang")),
-                                "label": lbl,
-                                "target": row.get("target"),
-                            })
-    except Exception:
-        pass
+    async with httpx.AsyncClient(timeout=45.0) as client:
+        meta = await hf_get(client, "/rows", {"dataset": PHRESHPHISH_DATASET, "config": "default", "split": "test", "offset": 0, "length": 1}, tries=4)
+        total = int(meta.get("num_rows_total") or 0)
+        if total <= 0:
+            raise RuntimeError(f"{PHRESHPHISH_DATASET} returned num_rows_total={total}")
+        # Sample offsets across the test split using small length=3 pages so huge HTML rows don't exceed datasets-server limits
+        pages = list(range(0, max(total - 5, 1), 250))
+        rng.shuffle(pages)
+        for offset in pages[:120]:
+            if all(len(got[k]) >= want[k] for k in want):
+                break
+            try:
+                data = await hf_get(
+                    client,
+                    "/rows",
+                    {"dataset": PHRESHPHISH_DATASET, "config": "default", "split": "test", "offset": offset, "length": 3},
+                    tries=3,
+                )
+            except Exception:
+                continue
+            rows = [x["row"] for x in data.get("rows", [])]
+            rng.shuffle(rows)
+            for row in rows:
+                lbl = str(row.get("label") or "").strip().lower()
+                url = str(row.get("url") or "").strip()
+                html = str(row.get("html") or "").strip()
+                if lbl in got and len(got[lbl]) < want[lbl] and url and html:
+                    got[lbl].append({
+                        "sha256": str(row.get("sha256") or hashlib.sha256(url.encode()).hexdigest()),
+                        "url": url,
+                        "state": extract_webpage_signals(url, html, row.get("target"), row.get("lang")),
+                        "label": lbl,
+                        "target": row.get("target"),
+                    })
 
     if sum(len(v) for v in got.values()) < n:
-        # Fill or fall back deterministically using the curated paired phreshphish samples
-        curated = _builtin_phreshphish_samples(seed=seed)
-        out: list[dict[str, Any]] = []
-        for s in curated[:n]:
-            st = extract_webpage_signals(s["url"], s["html"], s.get("target"), s.get("lang"))
-            st["pair_id"] = s.get("pair_id")
-            out.append({
-                "sha256": s["sha256"][:12],
-                "url": s["url"],
-                "state": st,
-                "label": s["label"],
-                "target": s.get("target"),
-                "pair_id": s.get("pair_id"),
-            })
-        return out
+        raise RuntimeError(
+            f"Fetched only {len(got['phish'])} phish + {len(got['benign'])} benign rows from {PHRESHPHISH_DATASET} (wanted {n})"
+        )
 
     merged = got["phish"] + got["benign"]
     rng.shuffle(merged)
     return merged
 
 
-async def phreshphish_suite(n: int = 80, seed: int = 42, cache_dir: Path | None = None) -> Suite:
-    """Build the `phreshphish` Stage-2 webpage/URL phishing benchmark suite (`--suite phreshphish`)."""
-    cache = cache_dir / f"phreshphish-n{n}-seed{seed}.json" if cache_dir else None
-    if cache and cache.exists():
-        rows = json.loads(cache.read_text(encoding="utf-8"))
-    else:
-        rows = await fetch_phreshphish(n=n, seed=seed)
-        if cache:
-            cache.parent.mkdir(parents=True, exist_ok=True)
-            cache.write_text(json.dumps(rows, indent=2), encoding="utf-8")
-
+def _rows_to_suite(name: str, description: str, rows: list[dict[str, Any]]) -> Suite:
     items: list[Item] = []
     for idx, r in enumerate(rows):
         is_phish = 1 if r["label"] == "phish" else 0
@@ -413,11 +393,48 @@ async def phreshphish_suite(n: int = 80, seed: int = 42, cache_dir: Path | None 
                 },
             )
         )
+    return Suite(name=name, description=description, questions=PHRESHPHISH_QUESTIONS, items=items, gate="is_phish")
 
-    return Suite(
-        name="phreshphish",
-        description=f"PhreshPhish (CC-BY-4.0) Stage-2 webpage & URL triage ({len(items)} pages, half phish / half benign, pre-parsed DOM + URL signals)",
-        questions=PHRESHPHISH_QUESTIONS,
-        items=items,
-        gate="is_phish",
+
+async def phreshphish_suite(n: int = 80, seed: int = 42, cache_dir: Path | None = None) -> Suite:
+    """Build the real `phreshphish` Stage-2 webpage/URL phishing benchmark suite (`--suite phreshphish`)."""
+    cache = cache_dir / f"phreshphish-n{n}-seed{seed}.json" if cache_dir else None
+    rows: list[dict[str, Any]] | None = None
+    if cache and cache.exists():
+        loaded = json.loads(cache.read_text(encoding="utf-8"))
+        # Reject any legacy synthetic-fallback cache entries that carry pair_id
+        if loaded and not any("pair_id" in r or "pair_id" in (r.get("state") or {}) for r in loaded):
+            rows = loaded
+    if rows is None:
+        rows = await fetch_phreshphish(n=n, seed=seed)
+        if cache:
+            cache.parent.mkdir(parents=True, exist_ok=True)
+            cache.write_text(json.dumps(rows, indent=2), encoding="utf-8")
+
+    return _rows_to_suite(
+        "phreshphish",
+        f"PhreshPhish (phreshphish/phreshphish, CC-BY-4.0) Stage-2 webpage & URL triage ({len(rows)} real test-split pages, pre-parsed DOM + URL signals)",
+        rows,
+    )
+
+
+def phreshphish_synthetic_smoke_suite(n: int = 80, seed: int = 42) -> Suite:
+    """Offline synthetic smoke-test suite mimicking the phreshphish schema (not real PhreshPhish data)."""
+    curated = _builtin_phreshphish_samples(seed=seed)[:n]
+    rows: list[dict[str, Any]] = []
+    for s in curated:
+        st = extract_webpage_signals(s["url"], s["html"], s.get("target"), s.get("lang"))
+        st["pair_id"] = s.get("pair_id")
+        rows.append({
+            "sha256": s["sha256"][:12],
+            "url": s["url"],
+            "state": st,
+            "label": s["label"],
+            "target": s.get("target"),
+            "pair_id": s.get("pair_id"),
+        })
+    return _rows_to_suite(
+        "phreshphish_synthetic_smoke",
+        f"Synthetic smoke-test webpage & URL triage ({len(rows)} generated pages; offline only)",
+        rows,
     )

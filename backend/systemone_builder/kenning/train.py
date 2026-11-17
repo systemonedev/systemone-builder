@@ -259,6 +259,8 @@ def main(argv: list[str] | None = None) -> int:
                         "many pairs (same gradient, bounded memory)")
     p.add_argument("--val-fraction", type=float, default=0.1)
     p.add_argument("--seed", type=int, default=13)
+    p.add_argument("--label-smoothing", type=float, default=0.0,
+                   help="uniform label smoothing epsilon (0..0.2) to prevent hard-label logit blowup")
     p.add_argument("--no-grad-checkpointing", action="store_true", help="faster, but needs far more VRAM")
     p.add_argument("--max-vram-fraction", type=float, default=0.85,
                    help="hard cap on this process's share of GPU memory. Over it, training fails with an OOM error "
@@ -326,8 +328,12 @@ def main(argv: list[str] | None = None) -> int:
                 for g in micro:
                     n = len(g["hyps"])
                     w = float(g.get("weight", 1.0))
+                    tgt = g["target"]
+                    if a.label_smoothing > 0.0 and n > 1:
+                        eps = min(max(a.label_smoothing, 0.0), 0.5)
+                        tgt = [(1.0 - eps) * y + eps / n for y in tgt]
                     logp = torch.log_softmax(scores[i:i + n], dim=-1)
-                    loss = loss - w * (torch.tensor(g["target"], device=device) * logp).sum()
+                    loss = loss - w * (torch.tensor(tgt, device=device) * logp).sum()
                     i += n
                 # Same gradient as one big batch: every group is weighted 1/len(batch).
                 loss = loss / len(batch)
@@ -373,7 +379,7 @@ def main(argv: list[str] | None = None) -> int:
         "trained_on": str(a.data),
         "train_groups": len(train),
         "heldout": {"zero_shot": before, "trained": after_raw_metrics, "calibrated": after},
-        "hyperparameters": {k: v for k, v in vars(a).items() if k in ("epochs", "lr", "batch_groups", "seed")},
+        "hyperparameters": {k: v for k, v in vars(a).items() if k in ("epochs", "lr", "batch_groups", "seed", "label_smoothing")},
         "created": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }, indent=1))
     print(f"[kenning-train] saved {a.out}", flush=True)

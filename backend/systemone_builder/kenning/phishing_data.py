@@ -672,7 +672,7 @@ def split_counterfactual_dataset(seed: int = 42, holdout_pairs_per_source: int =
     return train_ws + train_gen, held_ws + held_gen
 
 
-def to_training_rows(items: list[dict[str, Any]], seed: int = 7) -> list[dict[str, Any]]:
+def to_training_rows(items: list[dict[str, Any]], seed: int = 7, signal_dropout: float = 0.5) -> list[dict[str, Any]]:
     """Convert structured counterfactual email items into multi-layout Kenning training rows."""
     rng = random.Random(seed)
     rows: list[dict[str, Any]] = []
@@ -685,6 +685,8 @@ def to_training_rows(items: list[dict[str, Any]], seed: int = 7) -> list[dict[st
         chosen_layouts = ["structured_json", *rng.sample(["rfc822_headers", "gateway_event", "raw_email"], 2)]
         for idx_l, lname in enumerate(chosen_layouts):
             state = dict(layouts[lname])
+            if lname == "structured_json" and signal_dropout > 0 and rng.random() < signal_dropout:
+                state.pop("signals", None)
             state["pair_id"] = it.get("pair_id")
             row_qs = dict(q_dict)
             row_targets = dict(targets)
@@ -728,16 +730,35 @@ def to_training_rows(items: list[dict[str, Any]], seed: int = 7) -> list[dict[st
 
 
 def phishing_counterfactual_suite(seed: int = 42) -> Suite:
-    """Held-out benchmark suite of 80 paired counterfactual emails (40 twin pairs, never trained on)."""
+    """Held-out benchmark suite of 48 hand-written paired counterfactual emails (24 twin pairs, never trained on)."""
     _, held = split_counterfactual_dataset(seed=seed)
+    handwritten = [raw for raw in held if not str(raw.get("id", "")).startswith("cf")]
     items: list[Item] = []
-    for raw in held:
+    for raw in handwritten:
         state = phishing_layouts(raw)["structured_json"]
         state["pair_id"] = raw.get("pair_id")
         items.append(Item(id=raw["id"], state=state, labels=canonical_labels(raw)))
     return Suite(
         name="phishing_counterfactual",
-        description=f"Held-out paired counterfactual emails ({len(items)} emails / {len(items) // 2} twin pairs across header, auth, link, BEC & SaaS indicators)",
+        description=f"Held-out hand-written paired counterfactual emails ({len(items)} emails / {len(items) // 2} twin pairs across header, auth, link, BEC & SaaS indicators)",
+        questions=CANONICAL_QUESTIONS,
+        items=items,
+        gate="is_phish",
+    )
+
+
+def phishing_counterfactual_synthetic_suite(seed: int = 42) -> Suite:
+    """Held-out synthetic-generator paired counterfactual emails (32 emails / 16 pairs; same template family as training)."""
+    _, held = split_counterfactual_dataset(seed=seed)
+    synthetic = [raw for raw in held if str(raw.get("id", "")).startswith("cf")]
+    items: list[Item] = []
+    for raw in synthetic:
+        state = phishing_layouts(raw)["structured_json"]
+        state["pair_id"] = raw.get("pair_id")
+        items.append(Item(id=raw["id"], state=state, labels=canonical_labels(raw)))
+    return Suite(
+        name="phishing_counterfactual_synthetic",
+        description=f"In-distribution synthetic counterfactual pairs ({len(items)} emails / {len(items) // 2} pairs; same template generator as training)",
         questions=CANONICAL_QUESTIONS,
         items=items,
         gate="is_phish",
@@ -745,9 +766,10 @@ def phishing_counterfactual_suite(seed: int = 42) -> Suite:
 
 
 def phishing_layouts_suite(seed: int = 42, n_pairs: int = 20) -> Suite:
-    """Held-out counterfactual emails rendered across all 4 state layouts to measure layout invariance."""
+    """Held-out hand-written counterfactual emails rendered across all 4 state layouts to measure layout invariance."""
     _, held = split_counterfactual_dataset(seed=seed)
-    subset = held[: n_pairs * 2]
+    handwritten = [raw for raw in held if not str(raw.get("id", "")).startswith("cf")]
+    subset = handwritten[: n_pairs * 2]
     layout_names = ("structured_json", "rfc822_headers", "gateway_event", "raw_email")
     questions = {
         f"is_phish@{lname}": CANONICAL_QUESTIONS["is_phish"]

@@ -136,23 +136,20 @@ research, not a published model — full method and open items in [docs/kenning.
 
 <details><summary>Email &amp; Phishing suites (domain-specialised + regression checks)</summary>
 
-For email gateway and SOC pre-filtering, two domain-specialised Apache-2.0 models pair a deterministic Stage-0 email header/link/SaaS pre-parser (`kenning/phishing_data.py`) with counterfactual pair training:
-- **`kenning-phishing-v1`** (DeBERTa-v3-large, 512 tokens, ~37 ms p50): highest single-question discrimination (`0.970` ROC-AUC on `modern2`, `0.766` macro across 4 state layouts)
-- **`kenning-phishing-long-v1`** (ModernBERT-large, 1,280 tokens, ~18–30 ms p50): highest 6-question triage macro (`0.888` on `phishing_counterfactual`, `0.675` counterfactual twin-flip accuracy, `0.060` ECE)
+For email gateway and SOC pre-filtering, two domain-specialised Apache-2.0 models (`kenning-phishing-v1.1` on DeBERTa-v3-large and `kenning-phishing-long-v1.1` on ModernBERT-large) pair a deterministic Stage-0 pre-parser (`kenning/phishing_data.py`) with 50% signal dropout, `Clef-flash` soft-label distillation (`alpha=0.5`), and a two-stage cascade (`kenning/cascade.py`):
 
-| Suite / Metric | **kenning-phishing-v1** | **kenning-phishing-long-v1** | Kenning v0.6 (general) | Qwen2.5-7B-Instruct (XL) | Clef-flash (9B) |
-|---|---:|---:|---:|---:|---:|
-| **`phishing_counterfactual` (80 items / 40 pairs): 6-task macro** | 0.867 | **0.888** | 0.394 | 0.602 | 0.748 |
-| …`is_phish` accuracy @ 0.5 / ROC-AUC | **0.825** / 0.910 | **0.825** / **0.912** | 0.650 / 0.649 | 0.500 / 0.588 | 0.775 / 0.861 |
-| …`is_phish` counterfactual pair-flip accuracy | 0.650 | **0.675** | 0.300 | 0.000 | 0.550 |
-| …`is_phish` phishing auto-closed as safe (0.9 / 0.1 gate) | **0** | **0** | 3 | 40 | **0** |
-| …`recommended_action` (3-way routing) accuracy | 0.812 | **0.850** | 0.325 | 0.575 | 0.487 |
-| **`phishing_layouts` (128 items across 4 layouts): macro** | **0.766** | 0.750 | 0.555 | 0.500 | 0.750 |
-| **`phreshphish` (80 webpages, Stage-2 DOM/URL triage): `is_phish` / macro** | **1.000** / **1.000** | **1.000** / 0.829 | 0.900 / 0.929 | **1.000** / 0.983 | **1.000** / **1.000** |
-| **`modern2` (20 subtle body-only lures): accuracy / ROC-AUC** | 0.800 / **0.970** | 0.800 / 0.850 | 0.650 / 0.890 | 0.500 / 0.640 | **0.900** / 0.960 |
-| **`decision_index` (100 items, 5 areas): Index (0..100) / macro** | 38.1 / 0.638 | **57.2** / **0.760** | 49.2 / 0.721 | 72.8 / 0.843 | **97.9** / **0.990** |
-| Held-out modern emails (`modern`, v0.5 baseline): accuracy | — | — | 0.75 (v0.5) | — | 0.90 |
-| Out of domain: spam / emotion / news (v0.5 baseline) | — | — | 0.917 / 0.583 / 0.867 | — | 0.900 / 0.600 / 0.950 |
+| Suite / Metric | **kenning-phishing-v1.1** | **kenning-phishing-long-v1.1** | Kenning v0.6 (general) | Clef-flash (9B) |
+|---|---:|---:|---:|---:|
+| **`phishing_counterfactual` (48 hand-written held-out): 6-task macro** | 0.774 | **0.795** | 0.413 | 0.701 |
+| …`is_phish` accuracy @ 0.5 / ROC-AUC | 0.729 / 0.809 | 0.729 / 0.842 | 0.667 / 0.705 | **0.812** / **0.877** |
+| …`is_phish` counterfactual pair-flip accuracy | 0.458 | 0.458 | 0.333 | **0.625** |
+| …`is_phish` phishing auto-closed as safe (`0.9 / 0.1` gate) | **0** | **0** | 3 | **0** |
+| …`recommended_action` (3-way routing) accuracy | 0.625 | **0.708** | 0.396 | 0.479 |
+| **`phishing_counterfactual_synthetic` (32 in-dist templates): macro** | 0.990 | **1.000** | 0.365 | 0.818 |
+| **`phishing_layouts` (160 items across 4 layouts): macro / `raw_email`** | 0.756 / 0.725 | 0.719 / 0.700 | 0.556 / 0.550 | **0.769** / **0.750** |
+| **`phreshphish` (80 real webpages): `is_phish` / ROC-AUC** | **0.950** / **0.993** | 0.925 / 0.988 | 0.600 / 0.781 | 0.938 / 0.978 |
+| **`modern2` (20 subtle body-only lures): accuracy / ROC-AUC** | 0.800 / 0.900 | 0.700 / 0.920 | 0.650 / 0.890 | **0.900** / **0.960** |
+| Held-out modern emails (`modern`, v0.5 baseline): accuracy | — | — | 0.75 (v0.5) | 0.90 |
 
 </details>
 

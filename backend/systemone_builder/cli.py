@@ -87,15 +87,24 @@ def cmd_bench(a: argparse.Namespace) -> int:
         elif a.suite == "phishing_counterfactual":
             from systemone_builder.kenning.phishing_data import phishing_counterfactual_suite
             suite = phishing_counterfactual_suite(a.seed)
+        elif a.suite == "phishing_counterfactual_synthetic":
+            from systemone_builder.kenning.phishing_data import phishing_counterfactual_synthetic_suite
+            suite = phishing_counterfactual_synthetic_suite(a.seed)
         elif a.suite == "phishing_layouts":
             from systemone_builder.kenning.phishing_data import phishing_layouts_suite
             suite = phishing_layouts_suite(a.seed)
         elif a.suite == "decision_index":
             from systemone_builder.system_one.decision_index_suite import decision_index_suite
             suite = await decision_index_suite(a.n, a.seed, s.kenning_dir() / "bench_cache")
+        elif a.suite == "decision_probe":
+            from systemone_builder.system_one.decision_index_suite import decision_probe_suite
+            suite = await decision_probe_suite(a.n, a.seed)
         elif a.suite == "phreshphish":
             from systemone_builder.system_one.phreshphish_suite import phreshphish_suite
             suite = await phreshphish_suite(a.n, a.seed, s.kenning_dir() / "bench_cache")
+        elif a.suite == "phreshphish_synthetic_smoke":
+            from systemone_builder.system_one.phreshphish_suite import phreshphish_synthetic_smoke_suite
+            suite = phreshphish_synthetic_smoke_suite(a.n, a.seed)
         else:
             if not a.questions:
                 print("a JSONL suite needs --questions questions.json", file=sys.stderr)

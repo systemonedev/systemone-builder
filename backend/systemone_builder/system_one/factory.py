@@ -6,6 +6,7 @@ from systemone_builder.adapters.byom import resolve
 from systemone_builder.adapters.factory import build_adapter
 from systemone_builder.config import Settings
 from systemone_builder.system_one.engines import (
+    CascadeKenningEngine,
     DirectClefEngine,
     DirectKenningEngine,
     DirectKenningXLEngine,
@@ -15,7 +16,7 @@ from systemone_builder.system_one.engines import (
     SystemOneEngine,
 )
 
-ENGINES = ("kenning", "clef", "clef-direct", "xl", "jev", "glide", "local", "llm", "openai", "anthropic", "gemini", "openrouter", "ollama")
+ENGINES = ("kenning", "cascade", "clef", "clef-direct", "xl", "jev", "glide", "local", "llm", "openai", "anthropic", "gemini", "openrouter", "ollama")
 
 
 def _build_frontier_llm(provider: str, model: str, s: Settings) -> SystemOneEngine:
@@ -54,6 +55,8 @@ def build_engine(kind: str, s: Settings) -> SystemOneEngine:
         prefix, target = prefix.strip(), target.strip()
         if prefix == "kenning" and target:
             return DirectKenningEngine(target)
+        if prefix == "cascade" and target:
+            return CascadeKenningEngine(target)
         if prefix == "clef" and target:
             return DirectClefEngine(target)
         if prefix == "xl" and target:

@@ -595,29 +595,36 @@ def _load_external_decision_index_rows(path: Path, n: int, seed: int) -> tuple[d
 
 
 async def decision_index_suite(n: int = 100, seed: int = 42, cache_dir: Path | None = None) -> Suite:
-    """Build the Jev Decision Index benchmark suite (`--suite decision_index`)."""
+    """Build the Jev Decision Index benchmark suite from real `apolinario/decision-index` rows."""
     ext_env = os.environ.get("S1_DECISION_INDEX_ROWS")
     ext_path = Path(ext_env) if ext_env else (cache_dir / "decision-index-selected-rows.jsonl.gz" if cache_dir else None)
-    if ext_path and ext_path.exists():
-        questions, items = _load_external_decision_index_rows(ext_path, n, seed)
-        return Suite(
-            name="decision_index",
-            description=f"Jev Decision Index (imported from {ext_path.name}; {len(items)} items, chance-corrected [0..100] scoring)",
-            questions=questions,
-            items=items,
-            gate=None,
+    if not ext_path or not ext_path.exists():
+        raise RuntimeError(
+            "Real Jev Decision Index rows not found. Set S1_DECISION_INDEX_ROWS or place "
+            "`decision-index-selected-rows.jsonl.gz` in bench_cache/ (from `apolinario/decision-index`). "
+            "For the internal self-written 100-item probe, use `--suite decision_probe`."
         )
+    questions, items = _load_external_decision_index_rows(ext_path, n, seed)
+    return Suite(
+        name="decision_index",
+        description=f"Jev Decision Index (imported from {ext_path.name}; {len(items)} items, chance-corrected [0..100] scoring)",
+        questions=questions,
+        items=items,
+        gate=None,
+    )
 
+
+async def decision_probe_suite(n: int = 100, seed: int = 42) -> Suite:
+    """Internal 100-item self-written probe across 5 skill areas (not comparable to `multimodalart/jev-decision-index`)."""
     questions = _canonical_questions()
     items = _build_builtin_items(seed=seed)
     if 0 < n < len(items):
         items = items[:n]
     return Suite(
-        name="decision_index",
+        name="decision_probe",
         description=(
-            f"Jev Decision Index: {len(items)} stratified items across 5 weighted areas "
-            "(Knowledge & Reasoning 25.8%, Language Understanding 25.8%, Retrieval & Classification 20.0%, "
-            "Tools & Automation 18.3%, Arts & Human Taste 10.0%) with chance-corrected [0..100] scoring"
+            f"Internal self-written decision probe: {len(items)} items across 5 weighted areas "
+            "(not comparable to the external Jev Decision Index leaderboard)"
         ),
         questions=questions,
         items=items,

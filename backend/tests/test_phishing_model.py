@@ -7,6 +7,7 @@ from systemone_builder.kenning.phishing_data import (
     extract_email_signals,
     load_workspace_counterfactuals,
     phishing_counterfactual_suite,
+    phishing_counterfactual_synthetic_suite,
     phishing_layouts_suite,
     split_counterfactual_dataset,
     to_training_rows,
@@ -57,14 +58,25 @@ def test_stage0_signal_extractor_separates_counterfactual_twins():
 
 def test_phishing_training_rows_and_suites_build_cleanly():
     train_items, _ = split_counterfactual_dataset(seed=42)
-    rows = to_training_rows(train_items[:10], seed=7)
-    assert len(rows) >= 30
+    rows = to_training_rows(train_items[:20], seed=7, signal_dropout=0.5)
+    assert len(rows) >= 60
     assert all("pair_id" in r and "questions" in r and "targets" in r for r in rows)
+    # Verify signal dropout actually produces structured_json rows both with and without signals
+    sj_rows = [r for r in rows if isinstance(r["state"], dict) and "headers" in r["state"] and "body" in r["state"]]
+    with_sig = sum(1 for r in sj_rows if "signals" in r["state"])
+    without_sig = sum(1 for r in sj_rows if "signals" not in r["state"])
+    assert with_sig > 0 and without_sig > 0, f"expected signal dropout mix, got {with_sig} with / {without_sig} without"
 
     cf_suite = phishing_counterfactual_suite(seed=42)
     assert cf_suite.name == "phishing_counterfactual"
-    assert len(cf_suite.items) == 80
+    assert len(cf_suite.items) == 48
+    assert all(not it.id.startswith("cf") for it in cf_suite.items)
     assert cf_suite.gate == "is_phish"
+
+    cf_syn = phishing_counterfactual_synthetic_suite(seed=42)
+    assert cf_syn.name == "phishing_counterfactual_synthetic"
+    assert len(cf_syn.items) == 32
+    assert all(it.id.startswith("cf") for it in cf_syn.items)
 
     ly_suite = phishing_layouts_suite(seed=42, n_pairs=5)
     assert ly_suite.name == "phishing_layouts"
@@ -121,18 +133,25 @@ def test_frontier_engine_factory_supports_multi_provider_specs():
 
 
 def test_decision_index_suite_and_chance_corrected_scoring():
+    import asyncio
+    import pytest
     from systemone_builder.system_one.decision_index_suite import (
         AREA_WEIGHTS,
         _build_builtin_items,
         _canonical_questions,
         chance_corrected_question_score,
         decision_index_breakdown,
+        decision_index_suite,
     )
 
     qs = _canonical_questions()
     items = _build_builtin_items(seed=42)
     assert len(qs) == 15
     assert len(items) == 100
+
+    # decision_index_suite must fail loudly if external rows are not present
+    with pytest.raises(RuntimeError, match="Real Jev Decision Index rows not found"):
+        asyncio.run(decision_index_suite(n=10, seed=42, cache_dir=None))
 
     # Random guessing (1/K) must yield 0.0 chance-corrected score; 100% must yield 100.0
     assert chance_corrected_question_score({"n": 20, "accuracy": 0.50}, k_options=2, total_asked=20) == 0.0

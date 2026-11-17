@@ -329,6 +329,50 @@ class DirectKenningEngine(SystemOneEngine):
                 torch.cuda.empty_cache()
 
 
+class CascadeKenningEngine(SystemOneEngine):
+    """Two-stage cascade over an in-process Kenning cross-encoder."""
+
+    def __init__(self, path: str, device: str | None = None, max_length: int | None = None,
+                 lo: float = 0.05, hi: float = 0.92) -> None:
+        from pathlib import Path as _P
+
+        from systemone_builder.kenning.model import read_config
+
+        self._path = path
+        self._device = device
+        self._max_length = max_length
+        self._lo = lo
+        self._hi = hi
+        self._cascade: Any = None
+        cfg = read_config(path) if _P(path).is_dir() else {}
+        name = cfg.get("name") or _P(path).name or path
+        self.name = f"cascade ({name})"
+
+    def _ensure_loaded(self) -> Any:
+        if self._cascade is None:
+            from systemone_builder.kenning.cascade import CascadeKenning
+
+            self._cascade = CascadeKenning(
+                path=self._path, device=self._device, max_length=self._max_length, lo=self._lo, hi=self._hi
+            )
+        return self._cascade
+
+    async def answer(self, req: SystemOneRequest) -> SystemOneResponse:
+        c = await asyncio.to_thread(self._ensure_loaded)
+        return await asyncio.to_thread(c.answer, req)
+
+    async def aclose(self) -> None:
+        if self._cascade is not None:
+            import gc
+
+            import torch
+
+            self._cascade = None
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+
 class DirectKenningXLEngine(SystemOneEngine):
     """In-process decoder LM (KenningXL) single-pass logit readout engine."""
 
