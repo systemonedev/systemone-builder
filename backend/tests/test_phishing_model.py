@@ -132,26 +132,29 @@ def test_frontier_engine_factory_supports_multi_provider_specs():
     assert e_llm.name == "anthropic (claude-haiku-4-5)"
 
 
-def test_decision_index_suite_and_chance_corrected_scoring():
-    import asyncio
+async def test_decision_index_suite_requires_external_rows():
     import pytest
+    from systemone_builder.system_one.decision_index_suite import decision_index_suite
+
+    # decision_index_suite must fail loudly if external rows are not present
+    with pytest.raises(RuntimeError, match="Real Jev Decision Index rows not found"):
+        await decision_index_suite(n=10, seed=42, cache_dir=None)
+
+
+def test_decision_index_chance_corrected_scoring():
     from systemone_builder.system_one.decision_index_suite import (
         AREA_WEIGHTS,
         _build_builtin_items,
         _canonical_questions,
         chance_corrected_question_score,
         decision_index_breakdown,
-        decision_index_suite,
+        num_options,
     )
 
     qs = _canonical_questions()
     items = _build_builtin_items(seed=42)
     assert len(qs) == 15
     assert len(items) == 100
-
-    # decision_index_suite must fail loudly if external rows are not present
-    with pytest.raises(RuntimeError, match="Real Jev Decision Index rows not found"):
-        asyncio.run(decision_index_suite(n=10, seed=42, cache_dir=None))
 
     # Random guessing (1/K) must yield 0.0 chance-corrected score; 100% must yield 100.0
     assert chance_corrected_question_score({"n": 20, "accuracy": 0.50}, k_options=2, total_asked=20) == 0.0
@@ -162,9 +165,15 @@ def test_decision_index_suite_and_chance_corrected_scoring():
     # Coverage adjustment: if only 10 of 20 items were answered (at 100% accuracy), score is halved (50.0)
     assert chance_corrected_question_score({"n": 10, "accuracy": 1.00}, k_options=4, total_asked=20) == 50.0
 
+    # Construct raw accuracies that correspond to exactly 70.0 chance-corrected points for each K options
     fake_report = {
         "questions": {
-            qid: {"n": 7, "type": q.type, "accuracy": 0.85, "chance_corrected_score": 70.0}
+            qid: {
+                "n": 7,
+                "type": q.type,
+                "k_options": num_options(q),
+                "accuracy": (1.0 / num_options(q)) + 0.70 * (1.0 - 1.0 / num_options(q)),
+            }
             for qid, q in qs.items()
         }
     }
