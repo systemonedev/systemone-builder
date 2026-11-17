@@ -148,6 +148,8 @@ For email gateway and SOC pre-filtering, two domain-specialised Apache-2.0 model
 | **`phishing_counterfactual_synthetic` (32 in-dist templates): macro** | 0.990 | **1.000** | 0.365 | 0.818 |
 | **`phishing_layouts` (160 items across 4 layouts): macro / `raw_email`** | 0.756 / 0.725 | 0.719 / 0.700 | 0.556 / 0.550 | **0.769** / **0.750** |
 | **`phreshphish` (80 real webpages): `is_phish` / ROC-AUC** | **0.950** / **0.993** | 0.925 / 0.988 | 0.600 / 0.781 | 0.938 / 0.978 |
+| **`PhishNChips` (400 real DI #56 emails): `is_phishing` / ROC-AUC** | 0.662 / 0.709 | 0.713 / 0.810 | 0.510 / 0.633 | **0.748** / **0.852** |
+| **`decision_index` (320 real stratified items, 32/37 tracks): Index (0..100)** | 22.4 | 22.1 | 27.4 | **61.9** |
 | **`modern2` (20 subtle body-only lures): accuracy / ROC-AUC** | 0.800 / 0.900 | 0.700 / 0.920 | 0.650 / 0.890 | **0.900** / **0.960** |
 | Held-out modern emails (`modern`, v0.5 baseline): accuracy | — | — | 0.75 (v0.5) | 0.90 |
 

@@ -62,6 +62,44 @@ TASK_META: dict[str, tuple[str, bool]] = {
     "ah_forecast_plausibility": ("arts_human_taste", False),
     "ah_habermas_consensus": ("arts_human_taste", False),
     "ah_humicroedit_wit": ("arts_human_taste", False),
+    # Official Decision Index 0.3 catalog IDs (matches index-0.3.json)
+    "cat_25": ("knowledge_reasoning", True),
+    "cat_28": ("knowledge_reasoning", True),
+    "cat_30": ("knowledge_reasoning", False),
+    "cat_31": ("knowledge_reasoning", False),
+    "cat_32": ("knowledge_reasoning", False),
+    "cat_33": ("knowledge_reasoning", False),
+    "cat_43": ("knowledge_reasoning", False),
+    "cat_44": ("knowledge_reasoning", False),
+    "cat_45": ("knowledge_reasoning", True),
+    "cat_57": ("knowledge_reasoning", True),
+    "cat_58": ("knowledge_reasoning", True),
+    "cat_11": ("language_understanding", False),
+    "cat_12": ("language_understanding", True),
+    "cat_29": ("language_understanding", True),
+    "cat_38": ("language_understanding", False),
+    "cat_39": ("language_understanding", False),
+    "cat_40": ("language_understanding", False),
+    "cat_41": ("language_understanding", False),
+    "cat_42": ("language_understanding", False),
+    "cat_59": ("language_understanding", False),
+    "cat_4": ("retrieval_classification", True),
+    "cat_5": ("retrieval_classification", True),
+    "cat_36": ("retrieval_classification", True),
+    "cat_37": ("retrieval_classification", False),
+    "cat_56": ("retrieval_classification", False),
+    "cat_61": ("retrieval_classification", False),
+    "cat_1": ("tools_automation", True),
+    "cat_2": ("tools_automation", False),
+    "cat_3": ("tools_automation", True),
+    "cat_9": ("tools_automation", False),
+    "cat_62": ("tools_automation", False),
+    "cat_20": ("arts_human_taste", False),
+    "cat_21": ("arts_human_taste", False),
+    "cat_22": ("arts_human_taste", False),
+    "cat_23": ("arts_human_taste", False),
+    "cat_50": ("arts_human_taste", False),
+    "cat_64": ("arts_human_taste", False),
 }
 
 
@@ -93,24 +131,48 @@ def chance_corrected_question_score(qm: dict[str, Any], k_options: int, total_as
 
 
 def decision_index_breakdown(report: dict[str, Any], suite: Suite | None = None) -> dict[str, Any]:
-    """Compute per-area chance-corrected scores and the weighted Jev Decision Index total (0..100)."""
+    """Compute per-benchmark and per-area chance-corrected scores (0..100) matching Decision Index weights."""
     q_reports = report.get("questions") or {}
+    # Group question-level metrics by task_key (e.g. `cat_56` for PhishNChips, or `kr_mmlu_pro` for single-question tasks)
+    by_task: dict[str, list[tuple[str, dict[str, Any], int]]] = {}
+    for qid, qm in q_reports.items():
+        q_obj = suite.questions.get(qid) if suite else None
+        k = num_options(q_obj) if q_obj else (2 if qm.get("type") == "noul" else int(qm.get("k_options") or 4))
+        task_key = qid.split("::")[0] if "::" in qid else qid
+        by_task.setdefault(task_key, []).append((qid, qm, k))
+
     area_weighted_sum: dict[str, float] = {a: 0.0 for a in AREA_WEIGHTS}
     area_weight_denom: dict[str, float] = {a: 0.0 for a in AREA_WEIGHTS}
     task_scores: dict[str, float] = {}
 
-    for qid, qm in q_reports.items():
-        if not qm.get("n"):
+    for task_key, entries in sorted(by_task.items()):
+        # Each entry may represent 1 item (per-item unique qid) or N items (shared qid).
+        # Unanswered/errored items (n == 0) count as 0.0 raw accuracy (coverage adjustment).
+        total_n = 0
+        raw_hits = 0.0
+        weighted_chance = 0.0
+        for qid, qm, k in entries:
+            n_ans = int(qm.get("n") or 0)
+            if n_ans > 0:
+                acc = qm.get("accuracy")
+                if acc is None:
+                    acc = qm.get("exact_level")
+                acc_f = float(acc) if acc is not None else 0.0
+                total_n += n_ans
+                raw_hits += acc_f * n_ans
+                weighted_chance += (1.0 / max(k, 2)) * n_ans
+            else:
+                # Errored or unanswered item counts as 1 missed request
+                total_n += 1
+                weighted_chance += 1.0 / max(k, 2)
+
+        if total_n == 0:
             continue
-        q_obj = suite.questions.get(qid) if suite else None
-        k = num_options(q_obj) if q_obj else (2 if qm.get("type") == "noul" else int(qm.get("k_options") or 4))
-        cc = qm.get("chance_corrected_score")
-        if cc is None:
-            cc = chance_corrected_question_score(qm, k)
-        if cc is None:
-            continue
-        task_key = qid.split("::")[0] if "::" in qid else qid
-        task_scores[qid] = cc
+        raw_acc = raw_hits / total_n
+        chance = weighted_chance / total_n
+        cc = ((raw_acc - chance) / max(1.0 - chance, 1e-6)) * 100.0
+        cc = round(max(0.0, cc), 2)
+        task_scores[task_key] = cc
         area, is_gold = TASK_META.get(task_key, ("retrieval_classification", False))
         w = 1.2 if is_gold else 1.0
         area_weighted_sum[area] = area_weighted_sum.get(area, 0.0) + cc * w
@@ -570,7 +632,7 @@ def _build_builtin_items(seed: int = 42) -> list[Item]:
 
 
 def _load_external_decision_index_rows(path: Path, n: int, seed: int) -> tuple[dict[str, Question], list[Item]]:
-    """Load an external `apolinario/decision-index` `selected-rows.jsonl(.gz)` file if provided."""
+    """Load real `apolinario/decision-index` rows (`selected-rows.jsonl(.gz)` or stratified exports)."""
     opener = gzip.open if path.name.endswith(".gz") else open
     raw_rows: list[dict[str, Any]] = []
     with opener(path, "rt", encoding="utf-8") as fh:
@@ -584,11 +646,41 @@ def _load_external_decision_index_rows(path: Path, n: int, seed: int) -> tuple[d
     questions: dict[str, Question] = {}
     items: list[Item] = []
     for idx, r in enumerate(raw_rows):
-        qid = str(r.get("id") or r.get("item_id") or f"di_{idx:04d}")
+        cat_id = (r.get("_evaluation") or {}).get("catalog_id")
+        base_id = str(r.get("id") or r.get("item_id") or f"di_{idx:04d}")
+        prefix = f"cat_{cat_id}::" if cat_id is not None else ""
+        # Handle official decision-index format (questions dict + expected dict)
+        if isinstance(r.get("questions"), dict) and isinstance(r.get("expected"), dict):
+            # Prefer primary field (`verdict` for PhishNChips, or first non-null expected field)
+            scoring = r.get("scoring") or {}
+            cand_q = scoring.get("primary_field")
+            if not cand_q or r["expected"].get(cand_q) is None:
+                cand_q = next((k for k, v in r["expected"].items() if v is not None and k in r["questions"]), None)
+            if not cand_q:
+                continue
+            q_dict = dict(r["questions"][cand_q])
+            # Flatten structured dict instructions if needed by SystemOneQuestion validator
+            if not isinstance(q_dict.get("instructions"), str):
+                q_dict["instructions"] = json.dumps(q_dict["instructions"], ensure_ascii=False)
+            if isinstance(q_dict.get("criteria"), dict):
+                q_dict["criteria"] = {
+                    k: (json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list)) else v)
+                    for k, v in q_dict["criteria"].items()
+                }
+            q_obj = Question.model_validate(q_dict)
+            tgt = r["expected"][cand_q]
+            if q_obj.type == "noul" and isinstance(tgt, bool):
+                tgt = 1 if tgt else 0
+            qid = f"{prefix}{base_id}_{idx:04d}"
+            questions[qid] = q_obj
+            items.append(Item(id=qid, state=r.get("state"), labels={qid: tgt}))
+            continue
+
         q_dict = r.get("question") or next(iter((r.get("questions") or {}).values()), None)
         if not q_dict:
             continue
         q_obj = Question.model_validate(q_dict)
+        qid = f"{prefix}{base_id}"
         questions[qid] = q_obj
         items.append(Item(id=qid, state=r.get("state"), labels={qid: r.get("label", r.get("target"))}))
     return questions, items

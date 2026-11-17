@@ -245,8 +245,15 @@ class Kenning:
         with torch.inference_mode():
             for i in range(0, len(hyps), self.chunk):
                 part = hyps[i:i + self.chunk]
-                enc = self.tokenizer(premises[i:i + self.chunk], part, truncation="only_first",
-                                     max_length=self.max_length, padding=True, return_tensors="pt").to(self.device)
+                prems_part = premises[i:i + self.chunk]
+                try:
+                    enc = self.tokenizer(prems_part, part, truncation="only_first",
+                                         max_length=self.max_length, padding=True, return_tensors="pt").to(self.device)
+                except Exception as exc:
+                    if "Truncation error" not in str(exc):
+                        raise
+                    enc = self.tokenizer(prems_part, part, truncation="longest_first",
+                                         max_length=self.max_length, padding=True, return_tensors="pt").to(self.device)
                 tokens += int(enc["attention_mask"].sum())
                 logits = self.model(**enc).logits
                 out.extend(pair_scores(self.model, logits, self.positive_index).tolist())

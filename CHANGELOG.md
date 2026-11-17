@@ -41,8 +41,10 @@ Domain-specialised System One phishing triage models built to sit at the front o
 | **`phishing_counterfactual_synthetic` (32 in-dist templates) — Macro** | 0.990 | **1.000** | 0.986 | 0.365 | 0.818 |
 | **`phishing_layouts` (160 items across 4 layouts) — Macro / `raw_email`** | 0.756 / 0.725 | 0.719 / 0.700 | 0.756 / 0.725 | 0.556 / 0.550 | **0.769** / **0.750** |
 | **`phreshphish` (80 real webpages) — `is_phish` / ROC-AUC** | **0.950** / **0.993** | 0.925 / 0.988 | **0.950** / **0.993** | 0.600 / 0.781 | 0.938 / 0.978 |
+| **`PhishNChips` (400 real DI #56 emails) — `is_phishing` / ROC-AUC** | 0.662 / 0.709 | 0.713 / 0.810 | — | 0.510 / 0.633 | **0.748** / **0.852** |
+| **`decision_index` (320 stratified real DI 0.3 items, 32/37 tracks)** | 22.4 | 22.1 | — | 27.4 (v0.6) | **61.9** |
 | **`modern2` (20 subtle body-only lures) — Accuracy / ROC-AUC** | 0.800 / 0.900 | 0.700 / 0.920 | 0.800 / 0.900 | 0.650 / 0.890 | **0.900** / **0.960** |
-| Latency p50 (`phishing_layouts` / `modern2` / `phreshphish`) | **42 / 33 / 122 ms** | 99 / 138 / 405 ms | **42 / 37 / 122 ms** | 33 / 44 / 93 ms | 915 / 367 / 1456 ms |
+| Latency p50 (`phishing_layouts` / `modern2` / `PhishNChips`) | **42 / 33 / 62 ms** | 99 / 138 / **34 ms** | **42 / 37 / — ms** | 33 / 44 / 49 ms | 915 / 367 / 238 ms |
 
 ### Measurement fixes and a third-party benchmark — 2026-10
 The first run against a suite we did not write ([WorkflowEvals](https://huggingface.co/datasets/typesafe/workflowevals),
