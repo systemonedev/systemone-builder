@@ -55,6 +55,63 @@ def test_stage0_signal_extractor_separates_counterfactual_twins():
     assert s_q9a["multi_org_recipient_spread"] is True
     assert s_q9b["multi_org_recipient_spread"] is False
 
+    # Fixed false positives on benign counterfactuals: p012b (ESP bounce), p029b (brand tenant),
+    # p037b (-portal), p039b (-authority), q031b/q032b (multi CC within <=2 orgs)
+    for benign_id in ("p012b", "p029b", "p037b", "p039b", "q031b", "q032b"):
+        sb = extract_email_signals(ws[benign_id])
+        assert sb["lookalike_or_homoglyph_domain"] is False, f"{benign_id} falsely flagged lookalike"
+        assert sb["reply_to_mismatch"] is False, f"{benign_id} falsely flagged reply_to_mismatch"
+        assert sb["multi_org_recipient_spread"] is False, f"{benign_id} falsely flagged spread"
+
+    # Fixed true positives on subtle counterfactuals: p029a (rnicrosoft homoglyph),
+    # q026a (role vs address mismatch), q033a (SaaS platform claim mismatch), q015a (role vs doc mismatch)
+    assert extract_email_signals(ws["p029a"])["lookalike_or_homoglyph_domain"] is True
+    assert extract_email_signals(ws["q026a"])["role_vs_address_mismatch"] is True
+    assert extract_email_signals(ws["q033a"])["saas_platform_claim_mismatch"] is True
+    assert extract_email_signals(ws["q015a"])["recipient_role_vs_document_mismatch"] is True
+
+
+def test_stage0_flat_email_enrichment_and_trusted_links():
+    from systemone_builder.kenning.phishing_data import maybe_enrich_email_state
+    from systemone_builder.kenning.cascade import _fast_path_answer
+    from systemone_builder.system_one.contract import Question
+
+    legit_flat = {
+        "sender": "Patrick Wright",
+        "from": "patrick.wright@cedarlogic.com",
+        "subject": "quarterly plan now in Microsoft Teams workspace",
+        "body": "Join here: https://teams.microsoft.com/",
+        "link_display_text": "Join Teams workspace",
+        "link_url": "https://teams.microsoft.com/",
+    }
+    enriched_legit = maybe_enrich_email_state(legit_flat)
+    assert "signals" in enriched_legit
+    assert "signals" not in legit_flat  # non-mutating
+    assert enriched_legit["signals"]["trusted_cross_domain_link"] is True
+    assert enriched_legit["signals"]["link_vs_sender_domain_mismatch"] is False
+    assert enriched_legit["signals"]["ephemeral_or_shortener_link"] is False
+
+    phish_flat = {
+        "sender": "Mackenzie Baker",
+        "from": "mackenzie22@gmail.com",
+        "subject": "Mutual Non-Disclosure Agreement: qrco.de Partnership Inquiry",
+        "body": "Review via https://qrco.de/bfMWom",
+        "link_display_text": "View",
+        "link_url": "https://qrco.de/bfMWom",
+    }
+    enriched_phish = maybe_enrich_email_state(phish_flat)
+    assert enriched_phish["signals"]["ephemeral_or_shortener_link"] is True
+    assert enriched_phish["signals"]["freemail_sender_with_link_or_business_lure"] is True
+
+    # Non-email webpage state must remain untouched
+    web = {"webpage_triage": {"url": "https://example.com"}}
+    assert maybe_enrich_email_state(web) == web
+
+    # Cascade fast-path choice consistency
+    q_verdict = Question(type="choice", instructions="Verdict?", criteria={"phishing": "bad", "legitimate": "good"})
+    assert _fast_path_answer(q_verdict, 0.95).choice == "phishing"
+    assert _fast_path_answer(q_verdict, 0.03).choice == "legitimate"
+
 
 def test_phishing_training_rows_and_suites_build_cleanly():
     train_items, _ = split_counterfactual_dataset(seed=42)
@@ -204,4 +261,34 @@ def test_phreshphish_webpage_signal_extractor_and_samples():
     assert b_sig["domain_matches_brand"] is True
     assert b_sig["brand_vs_domain_mismatch"] is False
     assert b_sig["external_form_action"] is False
+
+
+def test_unwrap_safelinks_and_proofpoint_urldefense():
+    from systemone_builder.kenning.phishing_data import _url_domain, unwrap_gateway_url
+
+    inner = "https://docs.google.com/document/d/123/edit"
+    pp = f"https://urldefense.com/v3/__{inner}__;!!O0uQkS0!abc123$"
+    wrapped = (
+        "https://nam11.safelinks.protection.outlook.com/?url="
+        + pp.replace(":", "%3A").replace("/", "%2F")
+        + "&data=05%7C02%7Cuser%40example.edu&reserved=0"
+    )
+    assert unwrap_gateway_url(wrapped) == inner
+    assert _url_domain(wrapped) == "google.com"
+
+    sig = extract_email_signals({
+        "headers": {
+            "from_display": "Colleague (via Google Docs)",
+            "from_addr": "drive-shares-dm-noreply@google.com",
+            "reply_to": "colleague@example.edu",
+            "to_addr": "team@example.edu",
+            "subject": "Shared notes",
+        },
+        "auth": {"spf": "pass", "dkim": "pass", "dmarc": "pass"},
+        "links": [{"href": wrapped, "anchor_text": "Open"}],
+        "attachments": [],
+        "body": "See notes.",
+    })
+    assert sig["link_domains"] == ["google.com"]
+    assert sig["link_vs_sender_domain_mismatch"] is False
 

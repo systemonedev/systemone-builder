@@ -191,50 +191,82 @@ def metrics(raw: list[tuple[str, list[float], list[float]]], temps: dict[str, fl
     return out
 
 
+def _hard_target(y: list[float]) -> list[float]:
+    """Recover the one-hot empirical ground truth from hard or soft-distilled target vectors."""
+    if not y:
+        return y
+    top = max(range(len(y)), key=y.__getitem__)
+    return [1.0 if i == top else 0.0 for i in range(len(y))]
+
+
 def fit_biases(raw: list[tuple[str, list[float], list[float]]], temps: dict[str, float]) -> dict[str, float]:
-    """Per question type, the first-option bias with the lowest held-out NLL at the fitted temperature.
+    """Per question type, the first-option bias maximizing held-out balanced/raw accuracy (with hard-label NLL tie-break).
 
     Fitted after the temperatures, on the same held-out data, because the two do different jobs:
     temperature sets how sure the answer looks and bias sets which side of the threshold it lands on.
+    Evaluates against binarized ground truth so soft-distilled training targets do not shift the 0.5
+    decision boundary away from true class balance, and returns 0.0 unless a shift improves held-out
+    accuracy by at least 0.005.
     """
     grid = [x / 20 for x in range(-80, 81)]  # -4.00 .. 4.00 in 0.05 steps
     out: dict[str, float] = {}
     kinds_present = {k for k, _, _ in raw} & set(BIAS_TYPES)
+
+    def _best_bias(rows: list[tuple[list[float], list[float]]], t: float) -> float:
+        if not rows:
+            return 0.0
+        n_pos = sum(1 for _, y in rows if len(y) >= 2 and y[0] >= y[1])
+        n_neg = len(rows) - n_pos
+
+        def _score(b: float) -> tuple[float, float, float, float]:
+            tp = tn = 0
+            nll = 0.0
+            for s, y in rows:
+                yh = _hard_target(y)
+                probs = _softmax(s, t, b)
+                pred_pos = probs[0] >= probs[1]
+                true_pos = yh[0] >= yh[1]
+                if true_pos and pred_pos:
+                    tp += 1
+                elif not true_pos and not pred_pos:
+                    tn += 1
+                nll -= sum(yi * math.log(max(pi, 1e-12)) for yi, pi in zip(yh, probs))
+            acc = (tp + tn) / len(rows)
+            bal = (0.5 * (tp / n_pos) + 0.5 * (tn / n_neg)) if (n_pos > 0 and n_neg > 0) else acc
+            return (round(bal, 9), round(acc, 9), -round(nll, 9), -abs(b))
+
+        zero_bal, zero_acc, _znll, _ = _score(0.0)
+        best_b = max(grid, key=_score)
+        best_bal, best_acc, _bnll, _ = _score(best_b)
+        if best_b != 0.0 and (best_acc - zero_acc < 0.005) and not (best_bal - zero_bal >= 0.01 and best_acc >= zero_acc):
+            return 0.0
+        return round(best_b, 4)
+
     for kind in sorted(kinds_present):
         rows = [(s, y) for k, s, y in raw if k == kind]
         t = temps.get(kind, temps.get("noul", 1.0) if kind.startswith("noul") else 1.0)
-
-        def nll(b: float) -> float:
-            return -sum(sum(yi * math.log(max(pi, 1e-12)) for yi, pi in zip(y, _softmax(s, t, b)))
-                        for s, y in rows)
-
-        out[kind] = round(min(grid, key=nll), 4)
+        out[kind] = _best_bias(rows, t)
     if (kinds_present & {"noul_bare", "noul_criteria"}) and "noul" not in out:
         rows = [(s, y) for k, s, y in raw if k.startswith("noul")]
         t = temps.get("noul", 1.0)
-
-        def nll_all(b: float) -> float:
-            return -sum(sum(yi * math.log(max(pi, 1e-12)) for yi, pi in zip(y, _softmax(s, t, b)))
-                        for s, y in rows)
-
-        out["noul"] = round(min(grid, key=nll_all), 4)
+        out["noul"] = _best_bias(rows, t)
     return out
 
 
 def fit_temperatures(raw: list[tuple[str, list[float], list[float]]]) -> dict[str, float]:
-    """Per question type, the temperature with the lowest held-out NLL."""
+    """Per question type, the temperature with the lowest held-out NLL against empirical hard labels."""
     grid = [math.exp(x / 20) for x in range(-60, 61)]  # 0.05 .. 20
     temps: dict[str, float] = {}
     kinds_present = {k for k, _, _ in raw}
     for kind in sorted(kinds_present):
-        rows = [(s, y) for k, s, y in raw if k == kind]
+        rows = [(s, _hard_target(y)) for k, s, y in raw if k == kind]
 
         def nll(t: float) -> float:
             return -sum(sum(yi * math.log(max(pi, 1e-12)) for yi, pi in zip(y, _softmax(s, t))) for s, y in rows)
 
         temps[kind] = round(min(grid, key=nll), 4)
     if (kinds_present & {"noul_bare", "noul_criteria"}) and "noul" not in temps:
-        rows = [(s, y) for k, s, y in raw if k.startswith("noul")]
+        rows = [(s, _hard_target(y)) for k, s, y in raw if k.startswith("noul")]
 
         def nll_all(t: float) -> float:
             return -sum(sum(yi * math.log(max(pi, 1e-12)) for yi, pi in zip(y, _softmax(s, t))) for s, y in rows)

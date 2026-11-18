@@ -261,7 +261,13 @@ class Kenning:
 
     def answer(self, req: SystemOneRequest) -> SystemOneResponse:
         t0 = time.perf_counter()
-        premise = render_state(req.state)
+        state = req.state
+        is_phish_model = "phish" in self.name.lower() or self.config.get("domain") == "phishing"
+        if is_phish_model and not any(qid.endswith("@raw_email") for qid in req.questions):
+            from systemone_builder.kenning.phishing_data import maybe_enrich_email_state
+
+            state = maybe_enrich_email_state(state)
+        premise = render_state(state)
         groups: list[tuple[str, Question, list[Any], int, int]] = []
         hyps: list[str] = []
         for qid, q in req.questions.items():

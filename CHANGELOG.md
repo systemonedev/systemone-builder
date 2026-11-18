@@ -24,27 +24,30 @@ probabilities, no text). Two engine families now exist:
 ## Models
 
 ### kenning-phishing-v1.1 & kenning-phishing-long-v1.1 — 2026-11 (Apache-2.0)
-Domain-specialised System One phishing triage models built to sit at the front of an email/web security pipeline, trained with 50% Stage-0 signal dropout, `Clef-flash` soft-label distillation (`alpha=0.5`), and `--label-smoothing 0.05`, plus a two-stage cascade (`kenning/cascade.py`):
+Domain-specialised System One phishing triage models built to sit at the front of an email/web security pipeline ([`systemonedev/kenning-phishing-v1.1`](https://huggingface.co/systemonedev/kenning-phishing-v1.1) and [`systemonedev/kenning-phishing-long-v1.1`](https://huggingface.co/systemonedev/kenning-phishing-long-v1.1)), trained with Stage-0 structural signals + 50% signal dropout, `Clef-flash` soft-label distillation (`alpha=0.30`), hard-label empirical temperature/bias calibration, and a two-stage state-aware cascade (`kenning/cascade.py`):
 
 1. **Train/serve token-budget alignment (`kenning/train.py`, `kenning/model.py`)**: Extracted `budget_premise()` and applied `budget_groups()` in `train.py` so every hypothesis in a softmax group sees the exact same truncated state evidence.
-2. **Conditional `noul_criteria` vs `noul_bare` decision bias (`kenning/model.py`, `kenning/train.py`, `kenning/calibrate.py`)**: Fits and serves separate temperatures and additive decision biases for `noul_criteria` and `noul_bare` (falling back to `noul` for older checkpoints).
-3. **Stage-0 deterministic email & webpage pre-parsers + signal dropout (`kenning/phishing_data.py`, `system_one/phreshphish_suite.py`)**: Extracts structural signals (`link_vs_sender_domain_mismatch`, `reply_to_mismatch`, `any_auth_failed`, `lookalike_domain_suspected`, `sharer_same_org`, `recipient_org_count`, `attachment_risk_tier`) and drops `signals` on 50% of `structured_json` training rows so the model learns to read raw headers and links directly (`raw_email` accuracy improved `0.656 -> 0.725`).
-4. **Honest benchmark split & two-stage cascade (`kenning/cascade.py`, `system_one/bench.py`)**: Keeps `phishing_counterfactual` strictly to the 48 hand-written held-out items (`p*`, `q*`), reports the 32 template-generated pairs separately as `phishing_counterfactual_synthetic`, evaluates `phreshphish` on 80 real `phreshphish/phreshphish` test-split webpages, and adds `cascade:<model>` (Pass 1 `is_phish` gate in ~33 ms; Pass 2 remaining 5 questions only when `0.05 < p < 0.92`).
+2. **Hard-label calibration & conditional `noul_criteria` vs `noul_bare` decision bias (`kenning/model.py`, `kenning/train.py`, `kenning/calibrate.py`)**: Fits per-bucket temperatures (`T`) and balanced-accuracy decision biases against empirical hard labels (avoiding soft-target probability compression and restoring `57.5%–83.2%` gate automation on real email).
+3. **Stage-0 universal email & webpage pre-parsers + signal dropout (`kenning/phishing_data.py`, `kenning/model.py`, `system_one/phreshphish_suite.py`)**: Normalizes structured, flat (`PhishNChips`), nested (`modern2`), and RFC822 states at inference time to extract structural signals (`link_vs_sender_domain_mismatch`, `ephemeral_or_shortener_link`, `trusted_cross_domain_link`, `reply_to_mismatch`, `auth_failure`, `lookalike_or_homoglyph_domain`, `role_vs_address_mismatch`, `saas_platform_claim_mismatch`, `recipient_role_vs_document_mismatch`, `sharer_same_org`, `multi_org_recipient_spread`) and drops `signals` on 50% of training rows so raw inputs remain strong (`0.725`).
+4. **Honest benchmark split & two-stage state-aware cascade (`kenning/cascade.py`, `system_one/bench.py`)**: Keeps `phishing_counterfactual` strictly to the 48 hand-written held-out items (`p*`, `q*`), reports the 32 template-generated pairs separately as `phishing_counterfactual_synthetic`, evaluates `phreshphish` on 80 real test-split webpages and `PhishNChips` on 400 real DI #56 emails, and runs `cascade:<model>` (~34–49 ms Pass 1 gate + Pass 2 diagnostic routing).
 
 | Benchmark Suite | **kenning-phishing-v1.1** (DeBERTa-v3 435M) | **kenning-phishing-long-v1.1** (ModernBERT 395M) | cascade (v1.1) | kenning-large-v0.6 (general) | Clef-flash (9B teacher) |
 |---|---:|---:|---:|---:|---:|
-| **`phishing_counterfactual` (48 hand-written held-out) — 6-task macro** | 0.774 | **0.795** | 0.777 | 0.413 | 0.701 |
-| …`is_phish` accuracy @ 0.5 / ROC-AUC | 0.729 / 0.809 | 0.729 / 0.842 | 0.729 / 0.809 | 0.667 / 0.705 | **0.812** / **0.877** |
-| …`is_phish` counterfactual pair-flip accuracy | 0.458 | 0.458 | 0.458 | 0.333 | **0.625** |
-| …`is_phish` phishing auto-closed as safe (`0.9 / 0.1` gate) | **0** | **0** | **0** | 3 | **0** |
-| …`recommended_action` (deliver / escalate / quarantine) | 0.625 | **0.708** | 0.622 | 0.396 | 0.479 |
-| **`phishing_counterfactual_synthetic` (32 in-dist templates) — Macro** | 0.990 | **1.000** | 0.986 | 0.365 | 0.818 |
-| **`phishing_layouts` (160 items across 4 layouts) — Macro / `raw_email`** | 0.756 / 0.725 | 0.719 / 0.700 | 0.756 / 0.725 | 0.556 / 0.550 | **0.769** / **0.750** |
-| **`phreshphish` (80 real webpages) — `is_phish` / ROC-AUC** | **0.950** / **0.993** | 0.925 / 0.988 | **0.950** / **0.993** | 0.600 / 0.781 | 0.938 / 0.978 |
-| **`PhishNChips` (400 real DI #56 emails) — `is_phishing` / ROC-AUC** | 0.662 / 0.709 | 0.713 / 0.810 | — | 0.510 / 0.633 | **0.748** / **0.852** |
-| **`decision_index` (320 stratified real DI 0.3 items, 32/37 tracks)** | 22.4 | 22.1 | — | 27.4 (v0.6) | **61.9** |
-| **`modern2` (20 subtle body-only lures) — Accuracy / ROC-AUC** | 0.800 / 0.900 | 0.700 / 0.920 | 0.800 / 0.900 | 0.650 / 0.890 | **0.900** / **0.960** |
-| Latency p50 (`phishing_layouts` / `modern2` / `PhishNChips`) | **42 / 33 / 62 ms** | 99 / 138 / **34 ms** | **42 / 37 / — ms** | 33 / 44 / 49 ms | 915 / 367 / 238 ms |
+| **`phishing_counterfactual` (48 hand-written held-out) — 6-task macro** | 0.826 | **0.868** | 0.806 | 0.399 | 0.722 |
+| …`is_phish` accuracy @ 0.5 / ROC-AUC | 0.854 / 0.953 | **0.917** / **0.972** | 0.854 / 0.953 | 0.646 / 0.693 | 0.833 / 0.905 |
+| …`is_phish` counterfactual pair-flip accuracy | 0.708 | **0.833** | 0.708 | 0.292 | 0.667 |
+| …`is_phish` auto-triage (`0.9 / 0.1` gate) / FN auto-closed | 60.4% / **0** | **75.0%** / 1 | 60.4% / **0** | 56.2% / 3 | 25.0% / **0** |
+| …`recommended_action` (deliver / escalate / quarantine) | **0.854** | 0.833 | 0.833 | 0.375 | 0.500 |
+| **`phishing_counterfactual_synthetic` (32 in-dist templates) — Macro** | 0.995 | **1.000** | 0.844 | 0.464 | 0.823 |
+| **`phishing_layouts` (160 items across 4 layouts) — Macro / `raw_email`** | **0.856** / 0.725 | 0.825 / 0.725 | **0.856** / 0.725 | 0.556 / 0.550 | 0.781 / **0.750** |
+| **`phreshphish` (80 real webpages) — `is_phish` / ROC-AUC** | **0.963** / **0.992** | 0.925 / 0.983 | **0.963** / **0.992** | 0.600 / 0.781 | 0.938 / 0.978 |
+| **`PhishNChips` (400 real DI #56 emails) — `is_phishing` / ROC-AUC** | 0.900 / 0.974 | **0.953** / **0.984** | — | 0.510 / 0.633 | 0.748 / 0.852 |
+| …`PhishNChips` `verdict` (`choice`) / auto-triage (`0.9 / 0.1`) | **0.905** / 57.5% | 0.870 / **83.2%** | — | 0.527 / 45.8% | 0.743 / 41.2% |
+| …`PhishNChips` Recall @ 1% FPR | 0.875 | **0.945** | — | 0.240 | 0.315 |
+| **`decision_index` (320 stratified real DI 0.3 items, 32/37 tracks)** | 22.9 | 22.8 | — | 27.4 (v0.6) | **61.9** |
+| …DI areas: Retrieval / Lang / Tools / Knowledge / Arts | **31.8** / 26.1 / 22.0 / 15.7 / 17.2 | **36.2** / 30.7 / 16.8 / 13.6 / 10.5 | — | 22.5 / 52.0 / 19.8 / 14.9 / 19.5 | 25.4 / **76.7 / 77.8 / 62.9 / 65.5** |
+| **`modern2` (20 subtle body-only lures) — Accuracy / ROC-AUC** | **0.950** / **1.000** | 0.750 / 0.950 | **0.950** / **1.000** | 0.650 / 0.890 | 0.900 / 0.960 |
+| Latency p50 (`phishing_layouts` / `modern2` / `PhishNChips` / `phreshphish`) | 41 / 32 / 75 / 120 ms | **35 / 23 / 54 / 86 ms** | 42 / 35 / — / **44 ms** | 32 / 18 / 49 / 91 ms | 210 / 113 / 238 / 321 ms |
 
 ### Measurement fixes and a third-party benchmark — 2026-10
 The first run against a suite we did not write ([WorkflowEvals](https://huggingface.co/datasets/typesafe/workflowevals),

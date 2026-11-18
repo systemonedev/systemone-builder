@@ -272,18 +272,44 @@ Every benchmark run will output:
 
 ## 10. Execution Summary & Measured Benchmark Results (Completed `v1.1`)
 
-Both `kenning-phishing-v1.1` (DeBERTa-v3 435M) and `kenning-phishing-long-v1.1` (ModernBERT 395M) were trained with 50% signal dropout, `Clef-flash` soft-label distillation (`alpha=0.5`), and `--label-smoothing 0.05` on dual RTX 3090 GPUs, then evaluated with `phishing_counterfactual` strictly restricted to the **48 hand-written held-out items (`p*`, `q*`)**, `phishing_counterfactual_synthetic` (`32` template items) reported separately, and `phreshphish` evaluated on **80 real `phreshphish/phreshphish` test-split webpages** (`workspace/eval_results/bench-v1_1-*.json`):
+Both `kenning-phishing-v1.1` (DeBERTa-v3 435M, 512 tokens, published at [systemonedev/kenning-phishing-v1.1](https://huggingface.co/systemonedev/kenning-phishing-v1.1)) and `kenning-phishing-long-v1.1` (ModernBERT-large 395M, 1,280 tokens, published at [systemonedev/kenning-phishing-long-v1.1](https://huggingface.co/systemonedev/kenning-phishing-long-v1.1)) were trained with upgraded Stage-0 pre-parsing (`maybe_enrich_email_state` wired into inference), 50% signal dropout across 20 counterfactual families (`3,607` rows, `0.51` `noul` prior), `Clef-flash` soft-label distillation (`alpha=0.30`), `--label-smoothing 0.0`, and empirical hard-label temperature/bias calibration (`fit_temperatures` / `fit_biases` against `_hard_target`).
+
+### Testing Methodology
+- **`phishing_counterfactual` (`48` hand-written held-out emails / `24` twin pairs):** Strictly partitioned by `pair_id` so twins never straddle train and eval; excludes all synthetic generator templates (`cf*` / `xt*`).
+- **`phishing_counterfactual_synthetic` (`32` items / `16` twin pairs):** In-distribution pairs from the synthetic generator reported separately so template memorisation never inflates OOD scores.
+- **`phishing_layouts` (`160` evaluations):** Held-out hand-written emails rendered across `structured_json`, `rfc822_headers`, `gateway_event`, and `raw_email` (no Stage-0 injection on `raw_email`).
+- **`PhishNChips` (`400` real emails from `apolinario/decision-index` catalog #56):** Stratified `200` phishing / `200` legitimate sample from byte-identical rebuilt `added-rows.jsonl`, never trained on.
+- **`phreshphish` (`80` real test-split webpages, `CC-BY-4.0`):** Stage-0 DOM/URL triage from `phreshphish/phreshphish`.
+- **`modern2` (`20` held-out subtle body-only lures):** Nested/plain text lures with no synthetic headers.
+- **`decision_index` (`320` stratified items across `32/37` non-gated Decision Index 0.3 tracks):** Scored with official chance-corrected `[0..100]` area weights from `index-0.3.json`.
+
+### Phishing & Domain Suites (`0.90 / 0.10` automation gate)
 
 | Suite / Metric | **kenning-phishing-v1.1** | **kenning-phishing-long-v1.1** | **cascade (v1.1)** | kenning-large-v0.6 (general) | Clef-flash (9B teacher) |
 |---|---:|---:|---:|---:|---:|
-| **`phishing_counterfactual` (48 hand-written held-out): 6-task macro** | 0.774 | **0.795** | 0.777 | 0.413 | 0.701 |
-| …`is_phish` accuracy @ 0.5 / ROC-AUC | 0.729 / 0.809 | 0.729 / 0.842 | 0.729 / 0.809 | 0.667 / 0.705 | **0.812** / **0.877** |
-| …`is_phish` counterfactual pair-flip accuracy | 0.458 | 0.458 | 0.458 | 0.333 | **0.625** |
-| …`is_phish` phishing auto-closed as safe (`0.9 / 0.1`) | **0** | **0** | **0** | 3 | **0** |
-| …`recommended_action` (3-way routing) accuracy | 0.625 | **0.708** | 0.622 | 0.396 | 0.479 |
-| **`phishing_counterfactual_synthetic` (32 in-dist templates): macro** | 0.990 | **1.000** | 0.986 | 0.365 | 0.818 |
-| **`phishing_layouts` (160 items, 4 shapes): macro / `raw_email`** | 0.756 / 0.725 | 0.719 / 0.700 | 0.756 / 0.725 | 0.556 / 0.550 | **0.769** / **0.750** |
-| **`phreshphish` (80 real webpages, Stage-2 DOM/URL): `is_phish` / ROC-AUC** | **0.950** / **0.993** | 0.925 / 0.988 | **0.950** / **0.993** | 0.600 / 0.781 | 0.938 / 0.978 |
-| **`modern2` (20 subtle body-only lures): accuracy / ROC-AUC** | 0.800 / 0.900 | 0.700 / 0.920 | 0.800 / 0.900 | 0.650 / 0.890 | **0.900** / **0.960** |
-| Latency p50 (`phishing_layouts` / `modern2` / `phreshphish`) | **42 / 33 / 122 ms** | 99 / 138 / 405 ms | **42 / 37 / 122 ms** | 33 / 44 / 93 ms | 915 / 367 / 1456 ms |
+| **`phishing_counterfactual` (`48` held-out): 6-task macro** | 0.826 | **0.868** | 0.806 | 0.399 | 0.722 |
+| …`is_phish` accuracy @ 0.5 / ROC-AUC | 0.854 / 0.953 | **0.917** / **0.972** | 0.854 / 0.953 | 0.646 / 0.693 | 0.833 / 0.905 |
+| …`is_phish` counterfactual pair-flip accuracy | 0.708 | **0.833** | 0.708 | 0.292 | 0.667 |
+| …`is_phish` auto-triage rate / FN auto-closed | 60.4% / **0** | **75.0%** / 1 | 60.4% / **0** | 56.2% / 3 | 25.0% / **0** |
+| …`recommended_action` (4-way routing) accuracy | **0.854** | 0.833 | 0.833 | 0.375 | 0.500 |
+| **`phishing_counterfactual_synthetic` (`32` in-dist): macro** | 0.995 | **1.000** | 0.844 | 0.464 | 0.823 |
+| **`phishing_layouts` (`160` items, 4 shapes): macro / `raw_email`** | **0.856** / 0.725 | 0.825 / 0.725 | **0.856** / 0.725 | 0.556 / 0.550 | 0.781 / **0.750** |
+| **`phreshphish` (`80` real webpages): `is_phish` / ROC-AUC** | **0.963** / **0.992** | 0.925 / 0.983 | **0.963** / **0.992** | 0.600 / 0.781 | 0.938 / 0.978 |
+| **`PhishNChips` (`400` real DI #56): `is_phishing` / ROC-AUC** | 0.900 / 0.974 | **0.953** / **0.984** | — | 0.510 / 0.633 | 0.748 / 0.852 |
+| …`PhishNChips` `verdict` (`choice`) / auto-triage | **0.905** / 57.5% | 0.870 / **83.2%** | — | 0.527 / 45.8% | 0.743 / 41.2% |
+| …`PhishNChips` Recall @ 1% FPR / FN auto-closed | 0.875 / 8 | **0.945** / 6 | — | 0.240 / 75 | 0.315 / **3** |
+| **`modern2` (`20` subtle body-only lures): acc / ROC-AUC** | **0.950** / **1.000** | 0.750 / 0.950 | **0.950** / **1.000** | 0.650 / 0.890 | 0.900 / 0.960 |
+| Latency p50 (`layouts` / `modern2` / `PhishNChips` / `phresh`) | 41 / 32 / 75 / 120 ms | **35 / 23 / 54 / 86 ms** | 42 / 35 / — / **44 ms** | 32 / 18 / 49 / 91 ms | 210 / 113 / 238 / 321 ms |
+
+### Decision Index 0.3 Generalization Breakdown (`320` stratified items, `32/37` non-gated tracks)
+
+| Decision Index Area (Chance-Corrected `0..100`) | **kenning-phishing-v1.1** | **kenning-phishing-long-v1.1** | kenning-large-v0.6 | kenning-large-v0.5 | Clef-flash (9B) |
+|---|---:|---:|---:|---:|---:|
+| **Overall Decision Index (0..100)** | 22.9 | 22.8 | 27.4 | 20.5 | **61.9** |
+| Retrieval & Classification (incl. #56 PhishNChips) | 31.8 | **36.2** | 22.5 | 13.7 | 25.4 |
+| Language Understanding | 26.1 | 30.7 | 52.0 | 36.7 | **76.7** |
+| Tools & Automation | 22.0 | 16.8 | 19.8 | 11.1 | **77.8** |
+| Knowledge & Reasoning | 15.7 | 13.6 | 14.9 | 15.9 | **62.9** |
+| Arts & Human Taste | 17.2 | 10.5 | 19.5 | 21.2 | **65.5** |
+| Latency p50 (ms) | 35 ms | **28 ms** | 41 ms | 35 ms | 199 ms |
 
